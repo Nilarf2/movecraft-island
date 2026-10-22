@@ -3,15 +3,82 @@ import {Detector} from './detector.js';
 import {drawWorld, drawPostcard, mirror} from './scene.js';
 
 const $ = id => document.getElementById(id);
-const KEYS = {camera: 'movecraft.island.v1.camera', demo: 'movecraft.island.v1.demo'};
+const KEYS = {camera: 'movecraft.island.v1.camera', demo: 'movecraft.island.v1.demo', device: 'movecraft.island.v1.device'};
 const ui = {page: 'rules', mode: 'camera', island: null, transitioning: false, transition: null, storageError: '', corrupt: false};
-const camera = {stream: null, worker: null, running: false, starting: false, revision: 0, inFlight: false, sent: 0, timer: null, lastVideoTime: -1, landmarks: null, lastPose: 0, fpsAt: 0, frames: 0};
+const devicePreference = readDevicePreference();
+const camera = {stream: null, worker: null, running: false, starting: false, revision: 0, inFlight: false, sent: 0, timer: null, lastVideoTime: -1, landmarks: null, lastPose: 0, fpsAt: 0, frames: 0, devices: [], deviceId: devicePreference.id, activeDeviceId: '', activeLabel: ''};
+// Virtual webcams (phone-as-webcam, OBS, 虚拟摄像头) still need their companion app
+// running; marking them in the list keeps people from picking a device that is
+// registered with Windows but cannot deliver frames.
+const VIRTUAL_CAMERA = /(iriun|droidcam|epoccam|\bcamo\b|obs\s*virtual|virtual\s*cam|manycam|ndi|e2esoft|ivcam|虚拟摄像头)/i;
 let detector = new Detector('wave');
 let rulesDeadline = performance.now() + 10000;
 let transitionTimer = null;
 
 function status(message) { $('poseHint').textContent = message; $('loginStatus').textContent = message; }
 function notice(message) { $('storageWarning').textContent = message; $('storageWarning').hidden = !message; }
+function readDevicePreference() {
+  try {
+    const raw = localStorage.getItem(KEYS.device);
+    if (!raw) return {id: '', label: ''};
+    const value = JSON.parse(raw);
+    return {id: typeof value?.id === 'string' ? value.id : '', label: typeof value?.label === 'string' ? value.label : ''};
+  } catch { return {id: '', label: ''}; }
+}
+function rememberDevice(id, label) {
+  try { localStorage.setItem(KEYS.device, JSON.stringify({id, label})); } catch { /* storage full: selection just won't persist */ }
+}
+// Fall back to the default device when the remembered one was unplugged.
+// Before permission is granted the browser hides device ids and labels, so the
+// remembered id has to be trusted until a real list disproves it.
+function selectedDeviceId() {
+  const id = camera.deviceId;
+  if (!id) return '';
+  const known = camera.devices.filter(device => device.deviceId);
+  return known.length && !known.some(device => device.deviceId === id) ? '' : id;
+}
+function fillDeviceSelect(select, chosen) {
+  const auto = document.createElement('option');
+  auto.value = ''; auto.textContent = '自动选择（系统默认）';
+  select.replaceChildren(auto, ...camera.devices.filter(device => device.deviceId).map((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.deviceId;
+    option.textContent = (device.label || '摄像头 ' + (index + 1)) + (VIRTUAL_CAMERA.test(device.label) ? ' · 虚拟设备' : '');
+    return option;
+  }));
+  select.value = camera.devices.some(device => device.deviceId === chosen) ? chosen : '';
+}
+function deviceFields() { return ['cameraSelect', 'gameCameraSelect'].map($).filter(Boolean); }
+function describeDevice(label) { return label ? '当前设备：' + label + '。' : ''; }
+// Device labels are empty until permission is granted, so the list is refreshed
+// both before the first request (to restore a remembered choice) and after it.
+async function listCameras() {
+  if (!navigator.mediaDevices?.enumerateDevices) return camera.devices;
+  try {
+    camera.devices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'videoinput');
+  } catch { camera.devices = []; }
+  // A remembered camera that is no longer plugged in must not keep steering the
+  // next request at a dead device id; drop the preference as soon as we can see
+  // the real list.
+  const known = camera.devices.filter(device => device.deviceId);
+  if (camera.deviceId && known.length && !known.some(device => device.deviceId === camera.deviceId)) {
+    camera.deviceId = ''; rememberDevice('', '');
+  }
+  const chosen = selectedDeviceId();
+  for (const select of deviceFields()) fillDeviceSelect(select, chosen);
+  return camera.devices;
+}
+function describeCameraError(error) {
+  const hints = {
+    NotAllowedError: '未获得摄像头权限。请点击地址栏旁的摄像头图标允许访问，再重试。',
+    NotFoundError: '未找到摄像头，请连接摄像头后重试。',
+    NotReadableError: '摄像头无法读取：可能被其他应用占用，或该设备是尚未连接的虚拟摄像头。请在上方切换到其他摄像头后重试。',
+    OverconstrainedError: '所选摄像头不支持需要的分辨率或帧率，请切换到其他摄像头后重试。',
+    SecurityError: '浏览器阻止了摄像头访问，请用近期版本的 Chrome 或 Edge 打开本地地址。',
+    AbortError: '摄像头启动被中断，请重试。',
+  };
+  return hints[error.name] || '无法开启本机识别：' + (error.message || error.name);
+}
 function save() {
   if (!ui.island || ui.corrupt) return;
   ui.island.updatedAt = new Date().toISOString();
@@ -139,6 +206,8 @@ function stopCamera() {
   $('cameraPlaceholder').hidden = false; $('stopCamera').hidden = true;
   $('startCamera').hidden = ui.mode === 'demo' && ui.page === 'game'; $('startCamera').disabled = false;
   $('loginPreview').hidden = true; $('loginCamera').disabled = false;
+  for (const select of deviceFields()) select.disabled = false;
+  $('cameraBadge').title = ''; camera.activeDeviceId = ''; camera.activeLabel = '';
   $('fps').hidden = true; setDetector(activeAction());
 }
 function frameLoop(revision) {
@@ -156,19 +225,41 @@ function frameLoop(revision) {
   }
   camera.timer = setTimeout(() => frameLoop(revision), 70);
 }
+async function openCameraStream(deviceId) {
+  const video = {width: {ideal: 640}, height: {ideal: 480}, frameRate: {ideal: 24, max: 30}};
+  // facingMode is only a hint for phone cameras; it must not fight an explicit choice.
+  const constraints = deviceId ? {audio: false, video: {...video, deviceId: {exact: deviceId}}} : {audio: false, video: {...video, facingMode: 'user'}};
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
 async function startCamera() {
   if (camera.starting || camera.running) return;
   if (!navigator.mediaDevices?.getUserMedia || typeof Worker === 'undefined') { status('浏览器无法启用摄像头。请用本地启动程序打开，并使用较新的 Chrome 或 Edge。'); return; }
   camera.starting = true; const revision = ++camera.revision;
   $('loginCamera').disabled = true; $('startCamera').disabled = true;
+  for (const select of deviceFields()) select.disabled = true;
   status('正在请求摄像头权限…');
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {width: {ideal: 640}, height: {ideal: 480}, facingMode: 'user', frameRate: {ideal: 24, max: 30}}});
+    const wanted = selectedDeviceId();
+    let stream;
+    try {
+      stream = await openCameraStream(wanted);
+    } catch (error) {
+      // A remembered or user-picked device can be unplugged or busy; retrying the
+      // system default turns a dead end into a one-click recovery.
+      if (!wanted || !['NotReadableError', 'OverconstrainedError', 'NotFoundError', 'AbortError'].includes(error.name)) throw error;
+      stream = await openCameraStream('');
+      camera.deviceId = ''; rememberDevice('', '');
+      status('所选摄像头无法打开，已改用系统默认摄像头。');
+    }
     if (revision !== camera.revision) { stream.getTracks().forEach(t => t.stop()); return; }
     camera.stream = stream; $('video').srcObject = stream;
-    stream.getVideoTracks()[0].addEventListener('ended', () => { if (revision === camera.revision) { stopCamera(); status('摄像头连接已断开，请检查设备后重新开启。'); } });
+    const [track] = stream.getVideoTracks();
+    camera.activeDeviceId = track.getSettings().deviceId || ''; camera.activeLabel = track.label || '';
+    track.addEventListener('ended', () => { if (revision === camera.revision) { stopCamera(); status('摄像头连接已断开，请检查设备后重新开启。'); } });
     await $('video').play();
     if (revision !== camera.revision) return;
+    await listCameras();
+    for (const select of deviceFields()) { select.value = camera.devices.some(d => d.deviceId === camera.activeDeviceId) ? camera.activeDeviceId : ''; select.disabled = false; }
     status('正在加载本机姿态模型，首次开启可能需要几秒…');
     const worker = new Worker(new URL('./pose-worker.js', import.meta.url), {type: 'module'}); camera.worker = worker;
     await new Promise((resolve, reject) => {
@@ -199,16 +290,18 @@ async function startCamera() {
         else if (ui.page === 'game' && ui.mode === 'camera') doMove(detector.action);
       }
     };
-    $('cameraBadge').textContent = '本机识别中'; $('cameraBadge').className = 'camera-badge live';
+    $('cameraBadge').textContent = '本机识别中';
+    $('cameraBadge').className = 'camera-badge live';
+    $('cameraBadge').title = camera.activeLabel;
     $('cameraPlaceholder').hidden = true; $('stopCamera').hidden = false; $('startCamera').hidden = true;
     $('loginPreview').hidden = false; $('loginCamera').disabled = false; $('loginCamera').textContent = '摄像头已开启 · 点击暂停';
-    $('fps').hidden = false; status('摄像头已就绪，请站稳后完成动作。');
+    $('fps').hidden = false;
+    status('摄像头已就绪，请站稳后完成动作。' + describeDevice(camera.activeLabel));
     frameLoop(revision);
   } catch (error) {
     if (revision !== camera.revision) return;
     stopCamera();
-    const messages = {NotAllowedError: '未获得摄像头权限。请点击地址栏旁的权限图标允许摄像头，再重试。', NotFoundError: '未找到摄像头，请连接摄像头后重试。', NotReadableError: '摄像头可能被其他应用占用，请关闭占用程序后重试。'};
-    status(messages[error.name] || '无法开启本机识别：' + error.message);
+    status(describeCameraError(error));
     $('loginCamera').textContent = '重试开启摄像头';
   }
 }
@@ -244,6 +337,22 @@ const ruleTimer = setInterval(() => {
 $('enterIsland').onclick = () => { if (performance.now() >= rulesDeadline) showLogin(); };
 $('loginCamera').onclick = () => camera.running || camera.starting ? (stopCamera(), $('loginCamera').textContent = '开启摄像头，挥手登岛') : startCamera();
 $('demoLogin').onclick = () => enterGame('demo');
+// Changing the device while running restarts the pipeline so the new camera is
+// used without a second click.
+async function chooseDevice(event) {
+  const select = event.currentTarget;
+  camera.deviceId = select.value;
+  const device = camera.devices.find(item => item.deviceId === select.value);
+  rememberDevice(camera.deviceId, device?.label || '');
+  for (const other of deviceFields()) if (other !== select) other.value = select.value;
+  const wasRunning = camera.running || camera.starting;
+  if (wasRunning) stopCamera();
+  $('loginCamera').textContent = '开启摄像头，挥手登岛';
+  if (wasRunning) await startCamera();
+  else status(select.value ? '已选择摄像头，点击「' + (ui.page === 'game' ? '开启体感' : '开启摄像头') + '」开始。' : '将使用系统默认摄像头。');
+}
+for (const select of deviceFields()) select.onchange = chooseDevice;
+if (navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => { listCameras(); });
 $('startCamera').onclick = startCamera; $('stopCamera').onclick = () => { stopCamera(); status('体感已暂停，运动进度已保存。'); };
 $('calibrate').onclick = () => { setDetector(activeAction()); status('已清除旧动作基线，请重新站稳。'); };
 $('demoMove').onclick = () => { if (ui.mode === 'demo') doMove(activeAction()); };
@@ -306,3 +415,7 @@ setInterval(() => {
   if (result.error) { notice(result.error); return; }
   if (result.days) { clearTransition(); login(ui.island); setDetector(activeAction()); save(); render(); }
 }, 15000);
+// Populate the pickers up front: permission may already be granted, which means
+// labels are available before the first start, and a remembered camera can be
+// highlighted immediately. Without permission this just lists one blank entry.
+listCameras();
