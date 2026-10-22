@@ -1,0 +1,6 @@
+*
+!start.py
+!scripts/
+!scripts/**
+!web/
+!web/**

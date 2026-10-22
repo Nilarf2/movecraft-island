@@ -1,0 +1,12 @@
+reference/
+reports/
+deliverables/
+tools/
+node_modules/
+.DS_Store
+*.log
+*.save.json
+__pycache__/
+web/vendor/vision_bundle.mjs
+web/vendor/wasm/
+web/models/*.task
