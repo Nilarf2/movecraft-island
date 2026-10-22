@@ -2,6 +2,8 @@
 
 用摄像头完成运动，把运动换成水、食物、木材和庇护所。中文界面，浏览器本地姿态识别、本地存档，不需要服务器账号、API Key 或 GPU。项目聚焦荒岛玩法；历史服务中的射箭、滑雪模式不包含在本版。
 
+[在线试玩](https://pose.nfffff.dpdns.org/island/) · [下载完整离线包](https://pose.nfffff.dpdns.org/island/movecraft-island-offline.zip)
+
 ## 本地启动
 
 安装 Python 3.10 或更新版本，下载并解压仓库后运行：
