@@ -19,6 +19,19 @@ Windows 先运行 `py -3 scripts/setup_assets.py`，之后可双击 `start.bat`�
 
 不要直接双击 `web/index.html`：浏览器对摄像头与模块加载要求本地 HTTP 地址。手机访问电脑的局域网 HTTP 地址通常无法使用摄像头，需要为该地址配置 HTTPS。`localhost` 的摄像头例外只适用于当前设备。
 
+## 发给别人：双击即用的一键版
+
+如果对方不熟悉命令行、也不想安装 Python，可以发一键版压缩包：解压后双击 `双击启动游戏.bat`，浏览器会自动打开游戏。包内已含 MediaPipe 资源与 Python 3.11 嵌入式运行时，无需联网、无需安装任何东西，也不会写入系统。
+
+在一台已执行过 `setup_assets.py` 的 Windows 电脑上重新生成：
+
+```sh
+py -3 scripts/fetch_runtime.py      # 下载官方嵌入式 Python 到 runtime/，只需一次
+py -3 scripts/package_oneclick.py   # 输出 deliverables/movecraft-island-oneclick.zip
+```
+
+启动器会自动从 8787 起找一个空闲端口，并在控制台打印实际地址；关闭控制台窗口即停止服务。`runtime/` 与 `deliverables/` 都不进入版本库。
+
 ## Docker
 
 ```sh

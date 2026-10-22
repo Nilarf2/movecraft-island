@@ -1,6 +1,7 @@
+deliverables/
+runtime/
 reference/
 reports/
-deliverables/
 tools/
 node_modules/
 .DS_Store
