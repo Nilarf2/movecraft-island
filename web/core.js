@@ -20,6 +20,7 @@ export function ordinal(date) {
 }
 const finite = (n, min, max, fallback = min) => typeof n === 'number' && Number.isFinite(n) ? Math.max(min, Math.min(max, Math.floor(n))) : fallback;
 export function fresh(date = today()) {
+  if (!Number.isFinite(ordinal(date))) throw new Error('日期无效，请校准系统日期');
   return {version: VERSION, started: date, settled: date, lastLogin: date, absenceBlocks: 0,
     hp: 100, stamina: 0, water: 0, food: 0, wood: 0, shelter: 0,
     stage: 0, counts: [0, 0, 0, 0], rounds: 0, moves: 0, gifts: 0, failed: false,
@@ -32,17 +33,20 @@ export function sanitize(raw, date = today()) {
     if (!Number.isFinite(ordinal(raw[k])) || ordinal(raw[k]) > ordinal(date)) throw new Error('存档日期无效，或电脑日期早于存档');
     s[k] = raw[k];
   }
-  if (ordinal(s.started) > ordinal(s.settled) || ordinal(s.lastLogin) > ordinal(s.settled)) throw new Error('存档日期顺序无效');
+  if (ordinal(s.started) > ordinal(s.lastLogin) || ordinal(s.lastLogin) > ordinal(s.settled)) throw new Error('存档日期顺序无效');
   for (const k of ['stamina', 'water', 'food', 'wood', 'rounds', 'moves', 'gifts', 'absenceBlocks']) s[k] = finite(raw[k], 0, 1000000);
   s.hp = finite(raw.hp, 0, 100, 100);
   s.shelter = finite(raw.shelter, 0, 6);
   s.stage = finite(raw.stage, 0, 4);
+  // This is derived from the dates; trusting an imported value can skip decay.
+  s.absenceBlocks = Math.floor((ordinal(s.settled) - ordinal(s.lastLogin)) / 2);
   const target = required(s, date);
   s.counts = Array.from({length: 4}, (_, i) => finite(raw.counts?.[i], 0, target));
   // Stage controls rewards; keep actual counts from older, lower-target saves.
   for (let i = s.stage + 1; i < 4; i++) s.counts[i] = 0;
-  if (s.stage === 3 && s.wood < 5) throw new Error('建房存档缺少必要木材');
+  if ((s.stage === 2 || s.stage === 3) && s.wood < 5) throw new Error('建房存档缺少必要木材');
   if (s.stage < 4 && s.counts[s.stage] >= target) s.counts[s.stage] = target - 1;
+  if (s.stage < 4 && s.stamina + target - s.counts[s.stage] < STAGES[s.stage].cost) throw new Error('存档缺少完成当前关卡所需体力');
   s.failed = s.hp === 0;
   s.history = Array.isArray(raw.history) ? raw.history.filter(x => typeof x === 'string').map(x => x.slice(0, 160)).slice(-30) : [];
   return s;
@@ -66,8 +70,9 @@ export function roundSummary(s) {
 export function log(s, message) { s.history = [...s.history.slice(-29), message]; }
 // Uses local calendar days, with UTC day ordinals solely to avoid DST arithmetic.
 export function settle(s, date = today()) {
-  const to = ordinal(date), from = ordinal(s.settled);
-  if (!Number.isFinite(to) || to < from) return {error: '电脑日期早于存档，请校准时间后重试。', days: 0, loss: 0};
+  const to = ordinal(date), from = ordinal(s.settled), started = ordinal(s.started), lastLogin = ordinal(s.lastLogin);
+  if (![to, from, started, lastLogin].every(Number.isFinite) || started > lastLogin || lastLogin > from) return {error: '存档日期无效，请校准时间或导入完整备份。', days: 0, loss: 0};
+  if (to < from) return {error: '电脑日期早于存档，请校准时间后重试。', days: 0, loss: 0};
   let loss = 0, downgraded = 0;
   // At most 100 health points: even the strongest camp cannot survive an unbounded absence.
   for (let d = from + 1; d <= to && !s.failed; d++) {
@@ -102,8 +107,11 @@ export function login(s, date = today()) {
 }
 export function record(s, action, date = today()) {
   const sync = settle(s, date);
-  if (sync.error || s.failed || s.stage >= 4 || action !== STAGES[s.stage].action) return {accepted: false};
+  // A gesture started yesterday must not complete the first task of a new day.
+  if (sync.error || sync.days || s.failed || s.stage >= 4 || action !== STAGES[s.stage].action) return {accepted: false};
   const i = s.stage, config = STAGES[i], target = required(s, date);
+  if (i === 3 && s.wood < 5) return {accepted: false, message: '木材不足，请导入完整存档或重新开岛。'};
+  if (s.counts[i] + 1 >= target && s.stamina + 1 < config.cost) return {accepted: false, message: '完成本关所需体力不足，请导入完整存档或重新开岛。'};
   s.moves++; s.stamina++; s.counts[i]++;
   if (s.counts[i] < target) return {accepted: true, completed: false};
   s.stamina -= config.cost;
@@ -112,7 +120,6 @@ export function record(s, action, date = today()) {
   if (i === 1) s.wood += 5;
   if (i === 2) s.food += 2;
   if (i === 3) {
-    if (s.wood < 5) { s.stamina += config.cost; s.counts[i]--; return {accepted: true, completed: false, message: '木材不足，请导入完整存档或开始下一轮采集。'}; }
     s.wood -= 5;
     if (s.shelter < 6) s.shelter++;
     else { s.water++; s.food++; message = '营地加固完成'; }
@@ -123,11 +130,21 @@ export function record(s, action, date = today()) {
   s.stage++;
   return {accepted: true, completed: true, message};
 }
-export function nextRound(s) {
-  if (s.failed || s.stage !== 4) return false;
+export function nextRound(s, date = today()) {
+  const sync = settle(s, date);
+  if (sync.error || s.failed || s.stage !== 4) return false;
   s.stage = 0; s.counts = [0, 0, 0, 0]; return true;
 }
-export function exchange(s, kind) {
-  if (s.failed || !['food', 'water'].includes(kind) || s.stamina < 5) return false;
+export function canExchange(s, kind, date = today()) {
+  if (s.failed || s.hp <= 0 || !['food', 'water'].includes(kind) || ordinal(s.settled) !== ordinal(date)) return false;
+  const config = STAGES[s.stage];
+  const remaining = config ? Math.max(0, required(s, date) - s.counts[s.stage]) : 0;
+  const reserved = config ? Math.max(0, config.cost - remaining) : 0;
+  return s.stamina - 5 >= reserved;
+}
+export function exchange(s, kind, date = today()) {
+  if (!['food', 'water'].includes(kind)) return false;
+  const sync = settle(s, date);
+  if (sync.error || !canExchange(s, kind, date)) return false;
   s.stamina -= 5; s[kind]++; return true;
 }

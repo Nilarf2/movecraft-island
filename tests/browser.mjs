@@ -153,6 +153,7 @@ try {
   }
   await voicePage.locator('#settlementNext').click();
   assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*10个竖直跳.*双脚起跳/);
+  await voicePage.evaluate(() => window.__finishSpeech());
   await voicePage.locator('#demoMove').click();
   assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /已完成竖直跳1个.*做得好/);
   report.push('Settlement speaks every result and encouragement; stages and rep counts speak instructions and praise: passed');

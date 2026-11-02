@@ -6,9 +6,12 @@ finds a free port, serves the game, and opens the browser. Closing the
 console window stops the server.
 """
 from functools import partial
+from hashlib import sha256
+from http.client import HTTPConnection, HTTPException
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
 from pathlib import Path
-import socket
 import sys
 import threading
 import traceback
@@ -18,10 +21,23 @@ ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 REQUIRED = [
     "vendor/vision_bundle.mjs",
+    "vendor/wasm/vision_wasm_internal.js",
     "vendor/wasm/vision_wasm_internal.wasm",
+    "vendor/wasm/vision_wasm_nosimd_internal.js",
+    "vendor/wasm/vision_wasm_nosimd_internal.wasm",
+    "vendor/wasm/vision_wasm_module_internal.js",
+    "vendor/wasm/vision_wasm_module_internal.wasm",
     "models/pose_landmarker_lite.task",
 ]
 PORTS = [8787, 8788, 8789, 8790, 8791, 8792, 8793, 8794]
+INSTANCE_PATH = "/__movecraft_launcher_instance__"
+
+
+def instance_identity(web):
+    # Compare roots without disclosing a user's filesystem path over HTTP.
+    root = os.path.normcase(str(Path(web).resolve()))
+    return {"application": "movecraft-island-launcher", "protocol": 1,
+            "root": sha256(root.encode("utf-8")).hexdigest()}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -32,6 +48,17 @@ class Handler(SimpleHTTPRequestHandler):
         ".task": "application/octet-stream",
     }
 
+    def do_GET(self):
+        if self.path == INSTANCE_PATH:
+            payload = json.dumps(instance_identity(self.directory)).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        super().do_GET()
+
     def end_headers(self):
         # The game is fully local; never let a proxy or cache serve stale assets.
         self.send_header("Cache-Control", "no-store")
@@ -41,15 +68,36 @@ class Handler(SimpleHTTPRequestHandler):
         pass  # keep the console clean for non-technical players
 
 
-def pick_port():
-    for port in PORTS:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    return None
+def is_same_instance(port, web):
+    # Direct loopback HTTP deliberately bypasses system or environment proxies.
+    connection = HTTPConnection("127.0.0.1", port, timeout=0.3)
+    try:
+        connection.request("GET", INSTANCE_PATH)
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        payload = response.read(2049)
+        return len(payload) <= 2048 and json.loads(payload) == instance_identity(web)
+    except (OSError, HTTPException, ValueError):
+        return False
+    finally:
+        connection.close()
+
+
+def acquire_server(web=WEB, ports=PORTS):
+    # Search every candidate first: an earlier port may have become free since
+    # the existing game started, but changing origins would hide its save.
+    for port in ports:
+        if port and is_same_instance(port, web):
+            return None, port
+    for port in ports:
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(web)))
+            return server, server.server_port
+        except OSError:
+            if port and is_same_instance(port, web):
+                return None, port
+    return None, None
 
 
 def banner(url):
@@ -72,7 +120,8 @@ def banner(url):
 
 
 def main():
-    missing = [name for name in REQUIRED if not (WEB / name).is_file()]
+    missing = [name for name in REQUIRED
+               if not (WEB / name).is_file() or (WEB / name).stat().st_size == 0]
     if missing:
         print("游戏资源缺失，无法启动：")
         for name in missing:
@@ -82,21 +131,23 @@ def main():
         input("按回车键关闭…")
         return 1
 
-    port = pick_port()
+    server, port = acquire_server()
     if port is None:
         print("端口 " + str(PORTS[0]) + "-" + str(PORTS[-1]) + " 都被占用了。")
         print("请关闭一些程序（或重启电脑）后再试。")
         input("按回车键关闭…")
         return 1
 
-    try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(WEB)))
-    except OSError as error:
-        print("无法启动本地服务：" + str(error))
-        input("按回车键关闭…")
-        return 1
-
     url = "http://localhost:" + str(port)
+    if server is None:
+        print("同一文件夹的游戏已经运行，正在打开原来的游戏地址：" + url, flush=True)
+        print("存档继续使用原地址。请保持原来的启动窗口开着。", flush=True)
+        webbrowser.open(url)
+        return 0
+    if port != PORTS[0]:
+        print("默认端口被其他程序占用，游戏改用：" + url, flush=True)
+        print("注意：浏览器存档按地址和端口分别保存，换端口不会自动显示原存档。", flush=True)
+        print("如需原存档，请先关闭占用程序再重开，或从原地址导出后导入。", flush=True)
     banner(url)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
