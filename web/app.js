@@ -1,4 +1,5 @@
-import {STAGES, SHELTERS, PROTECTION, today, fresh, sanitize, age, required, settle, login, record, nextRound, exchange} from './core.js';
+import {STAGES, SHELTERS, PROTECTION, today, fresh, sanitize, age, required, settle, login, record, nextRound, exchange, roundSummary} from './core.js';
+import {Narrator} from './voice.js';
 import {Detector} from './detector.js';
 import {drawWorld, drawPostcard, mirror} from './scene.js';
 
@@ -14,6 +15,37 @@ const VIRTUAL_CAMERA = /(iriun|droidcam|epoccam|\bcamo\b|obs\s*virtual|virtual\s
 let detector = new Detector('wave');
 let rulesDeadline = performance.now() + 10000;
 let transitionTimer = null;
+const narrator = new Narrator();
+let speechRevision = 0, lastCountAt = 0, hintSince = 0, lastHint = '';
+const RULES_SPEECH = '欢迎来到体感荒岛。通过竖直跳、开合跳、手臂平举和深蹲，采集水、木材和食物，建造庇护所。每项从十次开始，每两天增加一次，最多二十五次。每天需要水和食物，生命归零挑战结束。请留出活动空间，量力运动。规则介绍完毕，准备挥手登岛。';
+function speakStage() {
+  const config = STAGES[ui.island?.stage];
+  lastCountAt = performance.now(); hintSince = lastCountAt; lastHint = '';
+  if (ui.page === 'game' && config && !ui.island.failed) narrator.speak(`${config.name}。完成${required(ui.island)}个${config.move}。${config.guide}`, {key: `stage.${config.action}`});
+}
+function speakCorrection(result) {
+  if (ui.page !== 'game' || ui.mode !== 'camera' || ui.transitioning || ui.island?.failed || !STAGES[ui.island?.stage]) return;
+  const now = performance.now();
+  if (result.hint !== lastHint) { lastHint = result.hint; hintSince = now; }
+  if (now - lastCountAt < 7000 || now - hintSince < 2500 || document.hidden || document.querySelector('dialog[open]')) return;
+  narrator.speak(result.hint, {key: `correction.${detector.action}`, correction: true});
+}
+function showSettlement() {
+  if (!ui.island || ui.island.stage !== 4 || ui.island.failed) return;
+  clearTransition(); stopCamera(); page('settlement');
+  const summary = roundSummary(ui.island);
+  $('settlementRows').replaceChildren(...summary.items.map(item => {
+    const row = document.createElement('p');
+    row.textContent = `完成 ${item.count} 个${item.move}，消耗 ${item.calories} 卡`;
+    return row;
+  }));
+  $('settlementTotal').textContent = `共消耗 ${summary.totalCalories} 卡`;
+  $('settlementRank').textContent = `已击败全国 ${summary.percentile}% 的人！`;
+  $('settlementNote').textContent = summary.percentileNote + ' ' + summary.calorieNote;
+  $('settlementEncouragement').textContent = summary.encouragement;
+  $('settlementMode').textContent = ui.mode === 'demo' ? '键鼠试玩结算 · 非实际运动记录' : '本轮运动结算';
+  narrator.speak([$('settlementMode').textContent, ...summary.items.map(item => `完成${item.count}个${item.move}，消耗${item.calories}卡。`), $('settlementTotal').textContent, $('settlementRank').textContent, $('settlementNote').textContent, summary.encouragement].join('。'), {key: 'settlement'});
+}
 
 function status(message) { $('poseHint').textContent = message; $('loginStatus').textContent = message; }
 function notice(message) { $('storageWarning').textContent = message; $('storageWarning').hidden = !message; }
@@ -104,9 +136,12 @@ function load(mode) {
   }
 }
 function page(name) {
+  speechRevision++; narrator.cancel();
   ui.page = name;
-  for (const p of ['rules', 'login', 'game']) $(p + 'Page').hidden = p !== name;
-  $('backLogin').hidden = name !== 'game';
+  window.scrollTo(0, 0);
+  $('voiceStatus').textContent = $('voiceEnabled').checked ? '语音朗读已开启' : '语音朗读已关闭';
+  for (const p of ['rules', 'login', 'game', 'settlement']) $(p + 'Page').hidden = p !== name;
+  $('backLogin').hidden = !['game', 'settlement'].includes(name);
 }
 function setDetector(action) { detector = new Detector(action); }
 function activeAction() { return ui.page === 'login' ? 'wave' : STAGES[ui.island?.stage]?.action || 'none'; }
@@ -124,11 +159,14 @@ function enterGame(mode) {
   if (mode === 'demo') status('键鼠体验使用独立存档。点击模拟动作，或按空格键。');
   if (ui.storageError) notice(ui.storageError);
   save(); render();
+  if (ui.island.stage === 4 && !ui.island.failed && !ui.corrupt) showSettlement();
+  else speakStage();
 }
 function showLogin() {
   save(); stopCamera(); clearTransition(); page('login'); setDetector('wave');
   $('loginCamera').disabled = false; $('loginCamera').textContent = '开启摄像头，挥手登岛';
   status('请留出足够活动空间，让上半身和髋部进入画面。');
+  startCamera();
 }
 function clearTransition() {
   clearTimeout(transitionTimer); transitionTimer = null;
@@ -149,7 +187,7 @@ function render() {
   $('taskReward').textContent = s.stage >= 4 ? `本轮奖励已领取 · ${SHELTERS[s.shelter]} · 淡水 ${s.water} · 食物 ${s.food}` : s.stage === 3 && s.shelter === 6 ? '完成本关 · 加固营地，淡水 +1 · 食物 +1' : '完成本关 · ' + config.reward;
   $('targetValue').textContent = ' / ' + target;
   $('repDots').replaceChildren(...Array.from({length: target}, (_, i) => { const node = document.createElement('span'); node.className = i < count ? 'done' : ''; return node; }));
-  $('targetHint').textContent = `每关 ${target} 次 · 每两天 +1 · 最多 15 次`;
+  $('targetHint').textContent = `每关 ${target} 次 · 每两天 +1 · 最多 25 次`;
   $('campLevel').textContent = 'Lv. ' + s.shelter; $('campName').textContent = SHELTERS[s.shelter];
   $('campBenefit').textContent = s.shelter ? `减少 ${Math.round(PROTECTION[s.shelter] * 100)}% 每日生命损耗 · 每日登岛赠 ${1 + Math.floor(s.shelter / 2)} 体力` : '每一次建造，都会让明天轻松一点。';
   $('shelterSteps').replaceChildren(...Array.from({length: 6}, (_, i) => { const node = document.createElement('span'); node.className = i < s.shelter ? 'done' : ''; node.title = SHELTERS[i + 1]; return node; }));
@@ -183,6 +221,9 @@ function doMove(action) {
   const s = ui.island, previousStage = s.stage, previousShelter = s.shelter;
   const result = record(s, action);
   if (!result.accepted) { render(); return; }
+  lastCountAt = performance.now();
+  const praise = ['做得好，继续加油！', '很棒，保持自己的节奏！', '每一次努力都算数！'];
+  const countSpeech = narrator.speak(`已完成${STAGES[previousStage].move}${s.counts[previousStage]}个。${praise[(s.counts[previousStage] - 1) % praise.length]}`, {key: `count.${action}.${s.counts[previousStage]}`});
   save();
   if (result.completed) {
     ui.transitioning = true;
@@ -190,7 +231,13 @@ function doMove(action) {
     $('toastTitle').textContent = result.message;
     $('toastDetail').textContent = previousStage === 3 ? SHELTERS[s.shelter] + ' · 本轮运动完成' : STAGES[previousStage].reward + ' · 即将进入下一关';
     $('toast').hidden = false;
-    transitionTimer = setTimeout(() => { clearTransition(); setDetector(activeAction()); render(); }, 2400);
+    const transition = ui.transition;
+    transitionTimer = setTimeout(async () => {
+      await countSpeech;
+      if (ui.page !== 'game' || !ui.transitioning || ui.transition !== transition) return;
+      clearTransition(); setDetector(activeAction()); render();
+      if (s.stage === 4) showSettlement(); else speakStage();
+    }, 3600);
     setDetector('none');
   }
   render();
@@ -247,6 +294,7 @@ async function startCamera() {
       // A remembered or user-picked device can be unplugged or busy; retrying the
       // system default turns a dead end into a one-click recovery.
       if (!wanted || !['NotReadableError', 'OverconstrainedError', 'NotFoundError', 'AbortError'].includes(error.name)) throw error;
+      if (revision !== camera.revision) return;
       stream = await openCameraStream('');
       camera.deviceId = ''; rememberDevice('', '');
       status('所选摄像头无法打开，已改用系统默认摄像头。');
@@ -259,6 +307,7 @@ async function startCamera() {
     await $('video').play();
     if (revision !== camera.revision) return;
     await listCameras();
+    if (revision !== camera.revision) return;
     for (const select of deviceFields()) { select.value = camera.devices.some(d => d.deviceId === camera.activeDeviceId) ? camera.activeDeviceId : ''; select.disabled = false; }
     status('正在加载本机姿态模型，首次开启可能需要几秒…');
     const worker = new Worker(new URL('./pose-worker.js', import.meta.url), {type: 'module'}); camera.worker = worker;
@@ -285,6 +334,7 @@ async function startCamera() {
       if (elapsed > 1000) { $('fps').textContent = Math.round(camera.frames * 1000 / elapsed) + ' FPS · ' + Math.round(data.latency) + ' ms'; camera.frames = 0; camera.fpsAt = performance.now(); }
       const result = detector.update(data.landmarks, data.timestamp, $('video').videoWidth / $('video').videoHeight);
       if (!ui.transitioning) status(result.hint);
+      if (!result.count) speakCorrection(result);
       if (result.count) {
         if (ui.page === 'login') enterGame('camera');
         else if (ui.page === 'game' && ui.mode === 'camera') doMove(detector.action);
@@ -297,11 +347,13 @@ async function startCamera() {
     $('loginPreview').hidden = false; $('loginCamera').disabled = false; $('loginCamera').textContent = '摄像头已开启 · 点击暂停';
     $('fps').hidden = false;
     status('摄像头已就绪，请站稳后完成动作。' + describeDevice(camera.activeLabel));
+    if (ui.page === 'login') narrator.speak('平举右手向左挥动完成确认', {key: 'login.confirm'});
     frameLoop(revision);
   } catch (error) {
     if (revision !== camera.revision) return;
     stopCamera();
     status(describeCameraError(error));
+    if (ui.page === 'login') narrator.speak(describeCameraError(error), {key: 'camera.error'});
     $('loginCamera').textContent = '重试开启摄像头';
   }
 }
@@ -334,7 +386,28 @@ const ruleTimer = setInterval(() => {
   $('enterIsland').disabled = remaining > 0;
   if (!remaining) clearInterval(ruleTimer);
 }, 150);
+async function speakRules() {
+  const revision = ++speechRevision;
+  $('voiceStatus').textContent = '正在朗读规则，结束后自动进入登岛页';
+  const result = await narrator.speak(RULES_SPEECH, {key: 'rules'});
+  if (revision !== speechRevision || ui.page !== 'rules') return;
+  if (result?.status === 'ended') showLogin();
+  else $('voiceStatus').textContent = '点击「重新朗读」启用语音，或点击开始继续';
+}
 $('enterIsland').onclick = () => { if (performance.now() >= rulesDeadline) showLogin(); };
+$('voiceEnabled').onchange = () => {
+  narrator.setEnabled($('voiceEnabled').checked);
+  $('voiceStatus').textContent = $('voiceEnabled').checked ? '语音朗读已开启' : '语音朗读已关闭';
+  if ($('voiceEnabled').checked) replayVoice();
+};
+function replayVoice() {
+  if (!$('voiceEnabled').checked) { $('voiceEnabled').checked = true; narrator.setEnabled(true); }
+  if (ui.page === 'rules') speakRules();
+  else if (ui.page === 'login') narrator.speak('平举右手向左挥动完成确认', {key: 'login.confirm'});
+  else if (ui.page === 'settlement') showSettlement();
+  else speakStage();
+}
+$('replayVoice').onclick = replayVoice;
 $('loginCamera').onclick = () => camera.running || camera.starting ? (stopCamera(), $('loginCamera').textContent = '开启摄像头，挥手登岛') : startCamera();
 $('demoLogin').onclick = () => enterGame('demo');
 // Changing the device while running restarts the pipeline so the new camera is
@@ -356,7 +429,16 @@ if (navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventLis
 $('startCamera').onclick = startCamera; $('stopCamera').onclick = () => { stopCamera(); status('体感已暂停，运动进度已保存。'); };
 $('calibrate').onclick = () => { setDetector(activeAction()); status('已清除旧动作基线，请重新站稳。'); };
 $('demoMove').onclick = () => { if (ui.mode === 'demo') doMove(activeAction()); };
-$('anotherRound').onclick = () => { if (!ui.corrupt && nextRound(ui.island)) { clearTransition(); setDetector(activeAction()); save(); render(); } };
+$('anotherRound').onclick = () => {
+  if (ui.corrupt) return;
+  const daily = login(ui.island);
+  if (daily.error) { page('game'); notice(daily.error); return; }
+  if (!daily.days && !nextRound(ui.island)) return;
+  clearTransition(); page('game'); setDetector(activeAction()); save(); render(); speakStage();
+  if (ui.mode === 'camera' && !ui.island.failed) startCamera();
+};
+$('settlementNext').onclick = () => $('anotherRound').onclick();
+$('settlementCamp').onclick = () => { page('game'); render(); };
 for (const [id, kind] of [['buyWater', 'water'], ['buyFood', 'food']]) $(id).onclick = () => { if (!ui.corrupt && exchange(ui.island, kind)) { save(); render(); } };
 $('help').onclick = () => $('helpDialog').showModal();
 for (const id of ['exitDemo', 'backLogin']) $(id).onclick = showLogin;
@@ -367,7 +449,7 @@ function confirmAction(title, text, action) {
 }
 function resetIsland() {
   confirmAction('重新开始荒岛？', `将替换当前${ui.mode === 'demo' ? '试玩' : '体感'}存档。建议先导出存档备份。`, () => {
-    clearTransition(); ui.island = fresh(); ui.corrupt = false; ui.storageError = ''; setDetector(activeAction()); save(); render();
+    clearTransition(); narrator.cancel(); ui.island = fresh(); ui.corrupt = false; ui.storageError = ''; setDetector(activeAction()); save(); render(); speakStage();
   });
 }
 $('newIsland').onclick = resetIsland; $('restartFailed').onclick = resetIsland;
@@ -390,7 +472,8 @@ $('saveFile').onchange = async () => {
     if (raw.mode !== ui.mode) throw new Error('存档模式不一致，请先切换到相应的体感或试玩模式');
     const imported = sanitize(raw.island);
     confirmAction('导入这份存档？', `将替换当前${ui.mode === 'demo' ? '试玩' : '体感'}存档。存档内未登录的天数会照常结算。`, () => {
-      clearTransition(); ui.island = imported; ui.corrupt = false; ui.storageError = ''; login(ui.island); setDetector(activeAction()); save(); render();
+      clearTransition(); narrator.cancel(); ui.island = imported; ui.corrupt = false; ui.storageError = ''; login(ui.island); setDetector(activeAction()); save(); render();
+      if (ui.island.stage === 4 && !ui.island.failed) showSettlement(); else speakStage();
     });
   } catch (error) { notice('无法导入：' + error.message); }
 };
@@ -399,13 +482,14 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); doMove(activeAction());
   }
 });
-document.addEventListener('visibilitychange', () => { setDetector(activeAction()); if (document.hidden) save(); });
-window.addEventListener('pagehide', () => { save(); stopCamera(); });
+document.addEventListener('visibilitychange', () => { setDetector(activeAction()); if (document.hidden) { narrator.cancel(); save(); } });
+window.addEventListener('pagehide', () => { narrator.cancel(); save(); stopCamera(); });
 // Stop stale tabs from overwriting a newer game session's save.
 window.addEventListener('storage', event => {
-  if (event.key === KEYS[ui.mode] && ui.page === 'game') {
+  if (event.key === KEYS[ui.mode] && ['game', 'settlement'].includes(ui.page)) {
     stopCamera(); clearTransition(); ui.corrupt = true;
     ui.storageError = '存档已在另一个标签页更新。本页已暂停写入，请返回登岛页重新载入，避免覆盖新进度。';
+    if (ui.page === 'settlement') page('game');
     notice(ui.storageError); render();
   }
 });
@@ -419,3 +503,4 @@ setInterval(() => {
 // labels are available before the first start, and a remembered camera can be
 // highlighted immediately. Without permission this just lists one blank entry.
 listCameras();
+speakRules();

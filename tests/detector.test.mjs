@@ -78,15 +78,60 @@ test('login wave requires a stable initial pose then a lateral sweep', () => {
   r.feed(end,10); assert.equal(r.counts,1);
 });
 
-test('occlusion, out-of-frame landmarks and frame gaps cancel partial movements', () => {
+test('sustained occlusion, out-of-frame landmarks and frame gaps cancel partial movements', () => {
   for (const invalid of [[], standing().map(p=>({...p,visibility:0})), standing().map(p=>({...p,y:1.1}))]) {
     const r=runner('raise'); r.feed(standing()); r.feed(raised());
-    assert.equal(r.feed(invalid,1).valid,false);
+    assert.equal(r.feed(invalid,4).valid,false);
     r.feed(standing()); assert.equal(r.counts,0);
   }
   const r=runner('raise'); r.feed(standing()); r.feed(raised());
   r.feed(standing(),1,1000); r.feed(standing()); assert.equal(r.counts,0);
   r.feed(raised()); r.feed(standing()); assert.equal(r.counts,1);
+});
+
+test('brief low-confidence frames preserve a full arm-raise cycle without counting missing poses', () => {
+  const r=runner('raise'); r.feed(standing()); r.feed(raised());
+  r.feed([],2); assert.equal(r.counts,0);
+  r.feed(standing()); assert.equal(r.counts,1);
+  r.feed(standing(),8); assert.equal(r.counts,1);
+});
+
+test('lower-confidence visible joints and relaxed shoulder height still require both arms and return', () => {
+  const r=runner('raise');
+  const lowConfidence=p=>p.map(x=>({...x,visibility:.28}));
+  const moderate=standing();
+  for (const [id,x,y] of [[13,.28,.30],[14,.72,.30],[15,.17,.36],[16,.83,.36]]) moderate[id]={x,y,visibility:1};
+  r.feed(lowConfidence(standing())); r.feed(lowConfidence(moderate)); assert.equal(r.counts,0);
+  r.feed(lowConfidence(standing())); assert.equal(r.counts,1);
+});
+
+test('modest jumping-jack opening and a shallow squat count through full cycles', () => {
+  const jack=runner('jack'), open=openJack();
+  open[15].y=open[16].y=.18; open[27].x=.39; open[28].x=.61;
+  jack.feed(standing()); jack.feed(open); assert.equal(jack.counts,0);
+  jack.feed(standing()); assert.equal(jack.counts,1);
+  const squat=runner('squat'), low=standing();
+  for (const [hip,knee,ankle] of [[23,25,27],[24,26,28]]) {
+    low[hip].y=.48; low[knee]={...low[knee],x:low[hip].x+.06,y:.67}; low[ankle].x=low[hip].x;
+  }
+  squat.feed(standing()); squat.feed(low); assert.equal(squat.counts,0);
+  squat.feed(standing()); assert.equal(squat.counts,1);
+});
+
+test('small jumps require landing and do not count while held above the ground', () => {
+  const r=runner('jump'); r.feed(standing(),8);
+  r.feed(shifted(standing(),-.02),8); assert.equal(r.counts,0);
+  r.feed(standing(),3); assert.equal(r.counts,1);
+  r.feed(shifted(standing(),-.006),8); r.feed(standing(),4); assert.equal(r.counts,1);
+});
+
+test('a short lateral login sweep near shoulder level is accepted once', () => {
+  const r=runner('wave'), start=standing();
+  start[14]={x:.49,y:.33,visibility:1}; start[16]={x:.40,y:.35,visibility:1};
+  r.feed(start,3); assert.equal(r.counts,0);
+  const end=structuredClone(start); end[16].x+=.08;
+  r.feed(end,3); assert.equal(r.counts,1);
+  r.feed(end,8); assert.equal(r.counts,1);
 });
 
 test('duplicate and reversed timestamps cannot add a repetition', () => {
