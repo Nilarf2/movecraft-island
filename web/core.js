@@ -8,6 +8,7 @@ export const STAGES = [
   {name: '耕种', action: 'raise', move: '手臂平举', result: '获得食物', guide: '从双臂自然下垂开始，向两侧平举至肩高，再完整放下。', reward: '食物 +2', cost: 3},
   {name: '建房', action: 'squat', move: '深蹲', result: '庇护所升级', guide: '从站直开始，屈膝下蹲，再站起。侧前方机位更容易看到膝盖。', reward: '庇护所升 1 级 · 消耗 5 木材', cost: 5},
 ];
+export const CALORIES_PER_MOVE = [1, 1, 0.5, 1];
 const DAY = 86400000;
 export function today(now = new Date()) {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
@@ -38,8 +39,7 @@ export function sanitize(raw, date = today()) {
   s.stage = finite(raw.stage, 0, 4);
   const target = required(s, date);
   s.counts = Array.from({length: 4}, (_, i) => finite(raw.counts?.[i], 0, target));
-  // Completed stages cannot be undone or claimed a second time by malformed counters.
-  for (let i = 0; i < s.stage; i++) s.counts[i] = target;
+  // Stage controls rewards; keep actual counts from older, lower-target saves.
   for (let i = s.stage + 1; i < 4; i++) s.counts[i] = 0;
   if (s.stage === 3 && s.wood < 5) throw new Error('建房存档缺少必要木材');
   if (s.stage < 4 && s.counts[s.stage] >= target) s.counts[s.stage] = target - 1;
@@ -48,7 +48,21 @@ export function sanitize(raw, date = today()) {
   return s;
 }
 export function age(s, date = today()) { return Math.max(0, ordinal(date) - ordinal(s.started)); }
-export function required(s, date = today()) { return Math.min(15, 5 + Math.floor(age(s, date) / 2)); }
+export function required(s, date = today()) { return Math.min(25, 10 + Math.floor(age(s, date) / 2)); }
+export function roundSummary(s) {
+  const items = STAGES.map(({action, move}, i) => {
+    const count = finite(s.counts?.[i], 0, 25);
+    return {action, move, count, calories: count * CALORIES_PER_MOVE[i]};
+  });
+  const totalCalories = items.reduce((total, item) => total + item.calories, 0);
+  return {
+    items, totalCalories,
+    percentile: totalCalories > 0 ? Math.min(99, 95 + Math.floor(totalCalories / 10)) : 0,
+    percentileNote: '鼓励值为游戏设定，非真实全国排名。',
+    calorieNote: '按游戏约定估算，仅作运动反馈，不代表实际热量测量。',
+    encouragement: '每一次起跳、伸展和坚持，都在让你变得更有力量。今天的你很棒，休息一下，明天继续加油！',
+  };
+}
 export function log(s, message) { s.history = [...s.history.slice(-29), message]; }
 // Uses local calendar days, with UTC day ordinals solely to avoid DST arithmetic.
 export function settle(s, date = today()) {

@@ -15,6 +15,15 @@ try {
   }
   browser = await chromium.launch({executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox']});
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'speechSynthesis', {configurable: true, value: null});
+    window.__cameraRequests = [];
+    navigator.mediaDevices.enumerateDevices = async () => [];
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      window.__cameraRequests.push(constraints);
+      throw new DOMException('Denied', 'NotAllowedError');
+    };
+  });
   const page = await context.newPage();
   page.on('pageerror', error => failures.push(error.message));
   page.on('requestfailed', request => failures.push(request.url() + ': ' + request.failure()?.errorText));
@@ -27,10 +36,16 @@ try {
   await page.waitForFunction(() => !document.querySelector('#enterIsland').disabled);
   report.push('10-second rule countdown: passed');
   await page.locator('#enterIsland').click();
-  await page.evaluate(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied', 'NotAllowedError'); }; });
-  await page.locator('#loginCamera').click();
   await page.waitForFunction(() => document.querySelector('#loginStatus').textContent.includes('未获得摄像头权限'));
-  report.push('Camera denial and retry message: passed');
+  assert.equal(await page.evaluate(() => window.__cameraRequests.length), 1);
+  const defaultCamera = await page.evaluate(() => window.__cameraRequests[0]);
+  assert.equal(defaultCamera.audio, false);
+  assert.equal(defaultCamera.video.facingMode, 'user');
+  assert.equal(defaultCamera.video.deviceId, undefined);
+  await page.locator('#loginCamera').click();
+  await page.waitForFunction(() => window.__cameraRequests.length === 2);
+  assert.match(await page.locator('#loginStatus').textContent(), /未获得摄像头权限/);
+  report.push('Login automatically requests the default camera, handles denial, and retries: passed');
   await page.locator('#demoLogin').click();
   const canvas = await page.locator('#scene').evaluate(canvas => {
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -40,29 +55,108 @@ try {
   assert.ok(canvas.colors > 50, JSON.stringify(canvas));
   await page.screenshot({path: 'reports/desktop-game.png', fullPage: true});
   for (let stage = 0; stage < 4; stage++) {
-    for (let rep = 0; rep < 5; rep++) await page.locator('#demoMove').click();
+    assert.equal(await page.locator('#targetValue').textContent(), ' / 10');
+    for (let rep = 0; rep < 10; rep++) await page.locator('#demoMove').click();
     assert.equal(await page.locator('#toast').isVisible(), true);
-    await page.waitForTimeout(2500);
+    await page.locator('#toast').waitFor({state: 'hidden', timeout: 10000});
   }
+  await page.locator('#settlementPage').waitFor({state: 'visible'});
+  assert.deepEqual(await page.locator('#settlementRows p').allTextContents(), [
+    '完成 10 个竖直跳，消耗 10 卡', '完成 10 个开合跳，消耗 10 卡',
+    '完成 10 个手臂平举，消耗 5 卡', '完成 10 个深蹲，消耗 10 卡',
+  ]);
+  assert.equal(await page.locator('#settlementTotal').textContent(), '共消耗 35 卡');
+  assert.match(await page.locator('#settlementRank').textContent(), /已击败全国 9\d% 的人/);
+  assert.match(await page.locator('#settlementNote').textContent(), /非真实全国排名/);
+  assert.match(await page.locator('#settlementMode').textContent(), /键鼠试玩.*非实际运动记录/);
+  assert.ok((await page.locator('#settlementEncouragement').textContent()).length > 15);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({path: 'reports/desktop-settlement.png', fullPage: true});
+  await page.setViewportSize({width: 390, height: 844});
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({path: 'reports/mobile-settlement.png', fullPage: true});
+  await page.setViewportSize({width: 1440, height: 1000});
+  await page.locator('#settlementCamp').click();
   assert.equal(await page.locator('#finished').isVisible(), true);
   assert.equal(await page.locator('#campName').textContent(), '简陋棚屋');
   assert.equal(await page.locator('#waterValue').textContent(), '2');
   assert.equal(await page.locator('#foodValue').textContent(), '2');
-  assert.equal(await page.locator('#staminaValue').textContent(), '6');
+  assert.equal(await page.locator('#staminaValue').textContent(), '26');
   await page.locator('#buyWater').click();
   assert.equal(await page.locator('#waterValue').textContent(), '3');
+  assert.equal(await page.locator('#staminaValue').textContent(), '21');
   await page.locator('#backLogin').click();
   await page.locator('#demoLogin').click();
+  assert.equal(await page.locator('#settlementPage').isVisible(), true);
+  assert.equal(await page.locator('#settlementTotal').textContent(), '共消耗 35 卡');
+  await page.locator('#settlementNext').click();
+  assert.equal(await page.locator('#gamePage').isVisible(), true);
+  assert.equal(await page.locator('#repValue').textContent(), '0');
+  assert.match(await page.locator('#taskTitle').textContent(), /竖直跳/);
+  assert.deepEqual(await page.evaluate(() => {
+    const save = JSON.parse(localStorage.getItem('movecraft.island.v1.demo'));
+    return {stage: save.stage, counts: save.counts};
+  }), {stage: 0, counts: [0, 0, 0, 0]});
   assert.equal(await page.locator('#campName').textContent(), '简陋棚屋');
   assert.equal(await page.locator('#waterValue').textContent(), '3');
-  report.push('All four stages, rewards, exchange, and save restore: passed');
+  report.push('Four 10-rep stages, 35-calorie settlement, rewards, exchange, save restore, and next round: passed');
   await page.setViewportSize({width: 390, height: 844});
   await page.screenshot({path: 'reports/mobile-game.png', fullPage: true});
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.locator('#backLogin').click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({path: 'reports/mobile-login.png', fullPage: true});
-  report.push('Desktop/mobile screenshots and no horizontal overflow: passed');
+  report.push('Desktop/mobile game, login, and settlement screenshots with no horizontal overflow: passed');
+
+  const voiceContext = await browser.newContext({viewport: {width: 1440, height: 1000}});
+  await voiceContext.addInitScript(() => {
+    window.__spoken = [];
+    window.__cameraRequests = [];
+    class FakeUtterance { constructor(text) { this.text = text; } }
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', {configurable: true, value: FakeUtterance});
+    Object.defineProperty(window, 'speechSynthesis', {configurable: true, value: {
+      speak(utterance) {
+        window.__spoken.push(utterance.text);
+        window.__finishSpeech = () => utterance.onend?.();
+        queueMicrotask(() => utterance.onstart?.());
+      },
+      cancel() {}, getVoices() { return [{lang: 'zh-CN'}]; },
+    }});
+    navigator.mediaDevices.enumerateDevices = async () => [];
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      window.__cameraRequests.push(constraints);
+      throw new DOMException('Denied', 'NotAllowedError');
+    };
+  });
+  const voicePage = await voiceContext.newPage();
+  voicePage.on('pageerror', error => failures.push(error.message));
+  await voicePage.goto(origin);
+  await voicePage.waitForFunction(() => window.__spoken.length === 1);
+  assert.equal(await voicePage.locator('#rulesPage').isVisible(), true);
+  assert.equal(await voicePage.locator('#enterIsland').isDisabled(), true);
+  assert.match(await voicePage.evaluate(() => window.__spoken[0]), /竖直跳.*开合跳.*手臂平举.*深蹲/);
+  await voicePage.evaluate(() => window.__finishSpeech());
+  await voicePage.locator('#loginPage').waitFor({state: 'visible'});
+  await voicePage.waitForFunction(() => window.__cameraRequests.length === 1);
+  assert.equal(await voicePage.locator('#rulesPage').isVisible(), false);
+  assert.equal(await voicePage.evaluate(() => window.__cameraRequests[0].video.facingMode), 'user');
+  report.push('Rule narration completion automatically enters login and requests the default camera: passed');
+  await voicePage.evaluate(async () => {
+    const {fresh} = await import('/core.js');
+    const save = {...fresh(), stage: 4, counts: [10, 10, 10, 10], rounds: 1, moves: 40, shelter: 1, stamina: 26};
+    localStorage.setItem('movecraft.island.v1.demo', JSON.stringify(save));
+  });
+  await voicePage.locator('#demoLogin').click();
+  const spokenSettlement = await voicePage.evaluate(() => window.__spoken.at(-1));
+  for (const line of ['完成10个竖直跳，消耗10卡', '完成10个开合跳，消耗10卡', '完成10个手臂平举，消耗5卡', '完成10个深蹲，消耗10卡', '共消耗 35 卡', '非真实全国排名', '明天继续加油']) {
+    assert.ok(spokenSettlement.includes(line), line);
+  }
+  await voicePage.locator('#settlementNext').click();
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*10个竖直跳.*双脚起跳/);
+  await voicePage.locator('#demoMove').click();
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /已完成竖直跳1个.*做得好/);
+  report.push('Settlement speaks every result and encouragement; stages and rep counts speak instructions and praise: passed');
+  await voiceContext.close();
   const workerResult = await page.evaluate(async () => {
     const worker = new Worker('/pose-worker.js', {type: 'module'});
     try {
