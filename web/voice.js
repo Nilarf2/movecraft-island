@@ -1,4 +1,4 @@
-// Add recorded Chinese clips by key here; missing clips use the device's voice.
+// Map exact spoken fragments to local audio paths; incomplete lines use device TTS.
 export const VOICE_ASSETS = {};
 
 export class Narrator {
@@ -35,7 +35,19 @@ export class Narrator {
     return this.active === request && !request.finished && request.attempt === attempt;
   }
 
-  speak(text, {key, replace = true, correction = false, group} = {}) {
+  speak(text, options = {}) {
+    return this.enqueue({text: String(text ?? '').trim(), ...options});
+  }
+
+  speakParts(parts, options = {}) {
+    const segments = (Array.isArray(parts) ? parts : []).map(part => ({
+      text: String(part?.text ?? ''),
+      key: part?.key ?? String(part?.text ?? ''),
+    })).filter(part => part.text);
+    return this.enqueue({text: segments.map(part => part.text).join(''), segments, ...options});
+  }
+
+  enqueue({text, segments, key, replace = true, correction = false, group} = {}) {
     text = String(text ?? '').trim();
     if (!this.enabled || !text) return Promise.resolve({status: 'skipped'});
     if (correction) {
@@ -45,7 +57,7 @@ export class Narrator {
     }
     if (replace) this.cancel();
     return new Promise(resolve => {
-      const request = {text, key, group, resolve, cleanup: null, finished: false, attempt: 0, phase: 'starting'};
+      const request = {text, segments, key, group, resolve, cleanup: null, finished: false, attempt: 0, phase: 'starting'};
       if (this.active) {
         // Keep the in-progress count audible, then read only the latest count.
         if (group) {
@@ -87,7 +99,11 @@ export class Narrator {
     this.active = request;
     this.notify();
     if (!this.owns(request)) return;
-    const source = request.key && this.assets[request.key];
+    if (request.segments?.length && this.environment.Audio && request.segments.every(part => typeof this.assets[part.key] === 'string' && this.assets[part.key])) {
+      this.playSequence(request);
+      return;
+    }
+    const source = (request.key && this.assets[request.key]) || this.assets[request.text];
     if (typeof source === 'string' && source && this.environment.Audio) this.playClip(request, source);
     else this.synthesize(request);
   }
@@ -131,7 +147,55 @@ export class Narrator {
     } catch { fallback(); }
   }
 
-  synthesize(request) {
+  playSequence(request) {
+    const attempt = ++request.attempt;
+    let index = 0, audio = null, startTimer, endTimer;
+    const cleanup = () => {
+      clearTimeout(startTimer); clearTimeout(endTimer);
+      if (audio) {
+        audio.onended = audio.onerror = audio.onplaying = null;
+        try { audio.pause(); } catch { /* Still allow fallback or completion. */ }
+        try { audio.removeAttribute?.('src'); audio.load?.(); } catch { /* Optional media APIs. */ }
+      }
+    };
+    const fallback = () => {
+      if (!this.owns(request, attempt)) return;
+      const remaining = request.segments.slice(index).map(part => part.text).join('');
+      request.attempt++;
+      cleanup();
+      this.synthesize(request, remaining);
+    };
+    request.cleanup = cleanup;
+    const playNext = () => {
+      if (!this.owns(request, attempt)) return;
+      if (index >= request.segments.length) { this.finish(request, 'ended'); return; }
+      const part = request.segments[index];
+      try {
+        const currentAudio = new this.environment.Audio(this.assets[part.key]);
+        audio = currentAudio;
+        currentAudio.preload = 'auto';
+        currentAudio.onended = () => {
+          if (!this.owns(request, attempt) || audio !== currentAudio) return;
+          clearTimeout(startTimer); clearTimeout(endTimer);
+          index++;
+          playNext();
+        };
+        currentAudio.onerror = () => { if (audio === currentAudio) fallback(); };
+        currentAudio.onplaying = () => {
+          if (!this.owns(request, attempt) || audio !== currentAudio) return;
+          request.phase = 'speaking';
+          clearTimeout(startTimer); clearTimeout(endTimer);
+          endTimer = setTimeout(fallback, this.timeoutFor(part.text));
+          this.notify();
+        };
+        startTimer = setTimeout(fallback, this.startTimeout);
+        Promise.resolve(currentAudio.play()).catch(() => { if (audio === currentAudio) fallback(); });
+      } catch { fallback(); }
+    };
+    playNext();
+  }
+
+  synthesize(request, text = request.text) {
     if (!this.owns(request)) return;
     const attempt = ++request.attempt;
     request.phase = 'starting';
@@ -148,7 +212,7 @@ export class Narrator {
       try { speech.cancel(); } catch { /* Some embedded browsers expose a partial API. */ }
     };
     try {
-      utterance = new Utterance(request.text);
+      utterance = new Utterance(text);
       utterance.lang = 'zh-CN'; utterance.rate = 1; utterance.pitch = 1;
       let voices = [];
       try { voices = speech.getVoices?.() || []; } catch { /* The default language still works. */ }
@@ -158,7 +222,7 @@ export class Narrator {
         if (!this.owns(request, attempt) || request.phase === 'speaking') return;
         request.phase = 'speaking';
         clearTimeout(startTimer);
-        endTimer = setTimeout(() => { if (this.owns(request, attempt)) this.finish(request, 'timeout'); }, this.timeoutFor(request.text));
+        endTimer = setTimeout(() => { if (this.owns(request, attempt)) this.finish(request, 'timeout'); }, this.timeoutFor(text));
         this.notify();
       };
       utterance.onend = () => { if (this.owns(request, attempt)) this.finish(request, 'ended'); };

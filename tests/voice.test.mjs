@@ -85,6 +85,74 @@ test('recorded clip uses manifest and failed clips fall back to synthesis', asyn
   assert.deepEqual(await fallback, {status: 'ended'});
 });
 
+test('fixed spoken text can directly reuse its recording key', async () => {
+  const {environment, calls} = speechEnvironment();
+  let clip;
+  environment.Audio = class {
+    constructor(source) { this.source = source; clip = this; }
+    play() { this.onplaying(); return Promise.resolve(); }
+    pause() {}
+  };
+  const text = '未获得摄像头权限。请重试。';
+  const voice = new Narrator({environment, assets: {[text]: 'audio/camera-denied.mp3'}});
+  const result = voice.speak(text, {key: text});
+  assert.equal(clip.source, 'audio/camera-denied.mp3');
+  clip.onended();
+  assert.deepEqual(await result, {status: 'ended'});
+  assert.deepEqual(calls, []);
+});
+
+test('reusable recorded segments play in order and cancellation stops the active segment', async () => {
+  const {environment, calls} = speechEnvironment();
+  const clips = [];
+  environment.Audio = class {
+    constructor(source) { this.source = source; clips.push(this); }
+    play() { this.onplaying(); return Promise.resolve(); }
+    pause() { this.paused = true; }
+  };
+  const voice = new Narrator({environment, assets: {'已完成': 'audio/done.mp3', '两': 'audio/two.mp3', '个。': 'audio/unit.mp3'}});
+  const result = voice.speakParts([{text: '已完成'}, {text: '两'}, {text: '个。'}], {key: 'count'});
+  assert.equal(voice.state.text, '已完成两个。');
+  assert.equal(clips[0].source, 'audio/done.mp3');
+  clips[0].onended();
+  assert.equal(clips[1].source, 'audio/two.mp3');
+  clips[1].onended();
+  assert.equal(clips[2].source, 'audio/unit.mp3');
+  voice.cancel();
+  assert.deepEqual(await result, {status: 'cancelled'});
+  assert.equal(clips[2].paused, true);
+  assert.deepEqual(calls, []);
+});
+
+test('incomplete segment recordings use one complete synthesized fallback', async () => {
+  const {environment, calls} = speechEnvironment();
+  const clips = [];
+  environment.Audio = class { constructor(source) { clips.push(source); } };
+  const voice = new Narrator({environment, assets: {'固定片段': 'audio/fixed.mp3'}});
+  const result = voice.speakParts([{text: '固定片段'}, {text: '十'}, {text: '次。'}]);
+  assert.deepEqual(clips, []);
+  assert.equal(calls[0].text, '固定片段十次。');
+  calls[0].onend();
+  assert.deepEqual(await result, {status: 'ended'});
+});
+
+test('a segment playback failure synthesizes only the remaining content', async () => {
+  const {environment, calls} = speechEnvironment();
+  const clips = [];
+  environment.Audio = class {
+    constructor(source) { this.source = source; clips.push(this); }
+    play() { this.onplaying(); return Promise.resolve(); }
+    pause() {}
+  };
+  const voice = new Narrator({environment, assets: {'前半句': 'audio/first.mp3', '后半句': 'audio/second.mp3'}});
+  const result = voice.speakParts([{text: '前半句'}, {text: '后半句'}]);
+  clips[0].onended();
+  clips[1].onerror();
+  assert.equal(calls[0].text, '后半句');
+  calls[0].onend();
+  assert.deepEqual(await result, {status: 'ended'});
+});
+
 test('rapid count groups preserve the current utterance and only queue the latest count', async () => {
   const {environment, calls} = speechEnvironment();
   const voice = new Narrator({environment});

@@ -127,6 +127,13 @@ test('round summary uses actual per-action counts and exact half-calorie arithme
   assert.equal(roundSummary(s).percentile, 99);
 });
 
+test('encouragement ranking stays high even for an empty imported completion', () => {
+  const s = fresh(DAY); s.stage = 4;
+  const summary = roundSummary(s);
+  assert.equal(summary.totalCalories, 0);
+  assert.equal(summary.percentile, 95);
+});
+
 test('save dates require started <= lastLogin <= settled and a valid current date', () => {
   const valid = {...fresh(DAY), started: '2026-10-19', settled: '2026-10-23'};
   assert.equal(sanitize(valid, '2026-10-23').lastLogin, DAY);

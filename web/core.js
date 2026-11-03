@@ -61,7 +61,7 @@ export function roundSummary(s) {
   const totalCalories = items.reduce((total, item) => total + item.calories, 0);
   return {
     items, totalCalories,
-    percentile: totalCalories > 0 ? Math.min(99, 95 + Math.floor(totalCalories / 10)) : 0,
+    percentile: Math.min(99, 95 + Math.floor(totalCalories / 10)),
     percentileNote: '鼓励值为游戏设定，非真实全国排名。',
     calorieNote: '按游戏约定估算，仅作运动反馈，不代表实际热量测量。',
     encouragement: '每一次起跳、伸展和坚持，都在让你变得更有力量。今天的你很棒，休息一下，明天继续加油！',

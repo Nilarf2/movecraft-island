@@ -17,11 +17,32 @@ let rulesDeadline = performance.now() + 10000;
 let transitionTimer = null;
 const narrator = new Narrator({onStateChange: updateVoiceStatus});
 let speechRevision = 0, storageRevision = 0, lastCountAt = 0, hintSince = 0, lastHint = '';
-const RULES_SPEECH = '欢迎来到体感荒岛。通过竖直跳、开合跳、手臂平举和深蹲，采集水、木材和食物，建造庇护所。每项从十次开始，每两天增加一次，最多二十五次。每天需要水和食物，生命归零挑战结束。请留出活动空间，量力运动。规则介绍完毕，准备挥手登岛。';
+const clip = text => ({text, key: text});
+function chineseInteger(value, useTwo = true) {
+  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  if (!Number.isInteger(value) || value < 0 || value > 99) throw new RangeError('语音数字超出录音库范围');
+  if (value < 10) return value === 2 && useTwo ? '两' : digits[value];
+  if (value < 20) return value === 10 ? '十' : '十' + digits[value % 10];
+  return digits[Math.floor(value / 10)] + '十' + (value % 10 ? digits[value % 10] : '');
+}
+function numberParts(value, {decimal = false} = {}) {
+  if (!Number.isFinite(value) || value < 0 || value > 99) throw new RangeError('语音数字超出录音库范围');
+  const whole = Math.floor(value), fraction = value - whole;
+  if (fraction < 1e-9) return [clip(chineseInteger(whole))];
+  if (Math.abs(fraction - 0.5) > 1e-9) throw new RangeError('语音数字只支持整数或半数');
+  return [clip(chineseInteger(whole, false)), clip('点五')];
+}
+function rulesParts() {
+  return [clip('欢迎来到体感荒岛。通过竖直跳、开合跳、手臂平举和深蹲，采集水、木材和食物，建造庇护所。每项从'),
+    ...numberParts(10), clip('次开始，每'), ...numberParts(2), clip('天增加一次，最多'), ...numberParts(25),
+    clip('次。每天需要水和食物，生命归零挑战结束。请留出活动空间，量力运动。规则介绍完毕，准备挥手登岛。')];
+}
 function speakStage() {
   const config = STAGES[ui.island?.stage];
   lastCountAt = performance.now(); hintSince = lastCountAt; lastHint = '';
-  if (ui.page === 'game' && config && !ui.island.failed && !ui.corrupt && !ui.clockError && !document.hidden && !hasDialog()) narrator.speak(`${config.name}。完成${required(ui.island)}个${config.move}。${config.guide}`, {key: `stage.${config.action}`});
+  if (ui.page === 'game' && config && !ui.island.failed && !ui.corrupt && !ui.clockError && !document.hidden && !hasDialog()) {
+    narrator.speakParts([clip(`${config.name}。完成`), ...numberParts(required(ui.island)), clip(`个${config.move}。${config.guide}`)], {key: `stage.${config.action}`});
+  }
 }
 function hasDialog() { return !!document.querySelector('dialog[open]'); }
 function updateVoiceStatus(state) {
@@ -35,7 +56,7 @@ function speakCorrection(result) {
   const now = performance.now();
   if (result.hint !== lastHint) { lastHint = result.hint; hintSince = now; }
   if (now - lastCountAt < 7000 || now - hintSince < 2500 || document.hidden || hasDialog()) return;
-  narrator.speak(result.hint, {key: `correction.${detector.action}`, correction: true});
+  narrator.speak(result.hint, {key: result.hint, correction: true});
 }
 function showSettlement() {
   if (!ui.island || ui.island.stage !== 4 || ui.island.failed) return;
@@ -51,7 +72,13 @@ function showSettlement() {
   $('settlementNote').textContent = summary.percentileNote + ' ' + summary.calorieNote;
   $('settlementEncouragement').textContent = summary.encouragement;
   $('settlementMode').textContent = ui.mode === 'demo' ? '键鼠试玩结算 · 非实际运动记录' : '本轮运动结算';
-  narrator.speak([$('settlementMode').textContent, ...summary.items.map(item => `完成${item.count}个${item.move}，消耗${item.calories}卡。`), $('settlementTotal').textContent, $('settlementRank').textContent, $('settlementNote').textContent, summary.encouragement].join('。'), {key: 'settlement'});
+  const speechParts = [clip(ui.mode === 'demo' ? '键鼠试玩结算，非实际运动记录。' : '本轮运动结算。')];
+  for (const item of summary.items) speechParts.push(clip('完成'), ...numberParts(item.count),
+    clip(`个${item.move}，消耗`), ...numberParts(item.calories, {decimal: true}), clip('卡。'));
+  speechParts.push(clip('共消耗'), ...numberParts(summary.totalCalories, {decimal: true}), clip('卡。'),
+    clip('已击败全国百分之'), ...numberParts(summary.percentile), clip('的人！'),
+    clip(summary.percentileNote + summary.calorieNote), clip(summary.encouragement));
+  narrator.speakParts(speechParts, {key: 'settlement'});
 }
 
 function status(message) { for (const id of ['poseHint', 'loginStatus']) if ($(id).textContent !== message) $(id).textContent = message; }
@@ -257,7 +284,9 @@ function doMove(action) {
   if (!result.accepted) { render(); return; }
   lastCountAt = performance.now();
   const praise = ['做得好，继续加油！', '很棒，保持自己的节奏！', '每一次努力都算数！'];
-  const countSpeech = narrator.speak(`已完成${STAGES[previousStage].move}${s.counts[previousStage]}个。${praise[(s.counts[previousStage] - 1) % praise.length]}`, {key: `count.${action}.${s.counts[previousStage]}`, replace: false, group: 'count'});
+  const completed = s.counts[previousStage];
+  const countSpeech = narrator.speakParts([clip(`已完成${STAGES[previousStage].move}`), ...numberParts(completed), clip('个。'), clip(praise[(completed - 1) % praise.length])],
+    {key: `count.${action}.${completed}`, replace: false, group: 'count'});
   save();
   if (result.completed) {
     ui.transitioning = true;
@@ -399,8 +428,9 @@ async function startCamera() {
   } catch (error) {
     if (revision !== camera.revision) return;
     stopCamera();
-    status(describeCameraError(error));
-    if (ui.page === 'login' && !document.hidden && !hasDialog()) narrator.speak(describeCameraError(error), {key: 'camera.error'});
+    const message = describeCameraError(error);
+    status(message);
+    if (ui.page === 'login' && !document.hidden && !hasDialog()) narrator.speak(message, {key: message});
     $('loginCamera').textContent = '重试开启摄像头';
   }
 }
@@ -437,7 +467,7 @@ async function speakRules() {
   const revision = ++speechRevision;
   if (!narrator.enabled) { updateVoiceStatus(narrator.state); return; }
   $('voiceStatus').textContent = '正在朗读规则，结束后自动进入登岛页';
-  const result = await narrator.speak(RULES_SPEECH, {key: 'rules'});
+  const result = await narrator.speakParts(rulesParts(), {key: 'rules'});
   if (revision !== speechRevision || ui.page !== 'rules' || !narrator.enabled || document.hidden || hasDialog()) return;
   if (result?.status === 'ended') showLogin();
   else $('voiceStatus').textContent = '点击「重新朗读」启用语音，或点击开始继续';
@@ -457,7 +487,10 @@ function replayVoice() {
     try { localStorage.setItem(KEYS.voice, 'true'); } catch { /* optional preference */ }
   }
   if (ui.page === 'rules') speakRules();
-  else if (ui.page === 'login') narrator.speak(camera.running ? '平举右手向左挥动完成确认' : $('loginStatus').textContent, {key: camera.running ? 'login.confirm' : 'camera.status'});
+  else if (ui.page === 'login') {
+    const text = camera.running ? '平举右手向左挥动完成确认' : $('loginStatus').textContent;
+    narrator.speak(text, {key: text});
+  }
   else if (ui.page === 'settlement') showSettlement();
   else speakStage();
 }

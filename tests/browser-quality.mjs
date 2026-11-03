@@ -161,6 +161,41 @@ try {
     assert.deepEqual(await spoken(page), [], 'muted reload must not enqueue rules narration');
   });
 
+  await scenario('settlement narration keeps all details without duplicate punctuation', {seed: makeSave('2026-11-02', {stage: 4, counts: [10, 10, 10, 10], rounds: 1, moves: 40, shelter: 1, stamina: 26})}, async ({page}) => {
+    await finishSpeech(page);
+    await page.locator('#loginPage').waitFor({state: 'visible'});
+    await page.locator('#demoLogin').click();
+    await page.locator('#settlementPage').waitFor({state: 'visible'});
+    const line = (await spoken(page)).at(-1);
+    for (const phrase of ['键鼠试玩结算，非实际运动记录。', '完成十个竖直跳，消耗十卡。', '完成十个开合跳，消耗十卡。', '完成十个手臂平举，消耗五卡。', '完成十个深蹲，消耗十卡。', '共消耗三十五卡。', '已击败全国百分之九十八的人！', '鼓励值为游戏设定，非真实全国排名。', '不代表实际热量测量。', '明天继续加油']) {
+      assert.ok(line.includes(phrase), `settlement narration should include: ${phrase}`);
+    }
+    assert.doesNotMatch(line, /[。！？.!?]{2}/, 'sentence boundaries must not repeat punctuation');
+  });
+
+  await scenario('fractional calories compose the separately recorded decimal clips', {
+    date: '2026-11-04T12:00:00+08:00',
+    seed: makeSave('2026-11-04', {started: '2026-11-02', stage: 4, counts: [10, 10, 11, 10], rounds: 1, moves: 41, shelter: 1, stamina: 27}),
+  }, async ({page}) => {
+    await finishSpeech(page);
+    await page.locator('#loginPage').waitFor({state: 'visible'});
+    await page.locator('#demoLogin').click();
+    const line = (await spoken(page)).at(-1);
+    assert.ok(line.includes('完成十一个手臂平举，消耗五点五卡。'));
+    assert.ok(line.includes('共消耗三十五点五卡。'));
+  });
+
+  await scenario('integer two calories uses the classifier form 两卡', {
+    seed: makeSave('2026-11-02', {stage: 4, counts: [0, 0, 4, 0], rounds: 1, moves: 4, shelter: 1, stamina: 4}),
+  }, async ({page}) => {
+    await finishSpeech(page);
+    await page.locator('#loginPage').waitFor({state: 'visible'});
+    await page.locator('#demoLogin').click();
+    const line = (await spoken(page)).at(-1);
+    assert.ok(line.includes('完成四个手臂平举，消耗两卡。'));
+    assert.ok(line.includes('共消耗两卡。'));
+  });
+
   const quickCountSave = makeSave('2026-11-02', {stamina: 12});
   await scenario('rapid rep narration coalesces to the latest count and transition waits for it', {seed: quickCountSave}, async ({page}) => {
     await enterDemo(page);
@@ -169,20 +204,20 @@ try {
     assert.equal(lines.filter(line => /已完成竖直跳/.test(line)).length, 0, 'counts must wait for the activity instructions');
     await finishSpeech(page);
     lines = await spoken(page);
-    assert.ok(lines.some(line => /已完成竖直跳4个/.test(line)), 'queued count should collapse to latest');
+    assert.ok(lines.some(line => /已完成竖直跳四个/.test(line)), 'queued count should collapse to latest');
     for (let i = 0; i < 6; i++) await page.locator('#demoMove').click();
     await finishSpeech(page);
     lines = await spoken(page);
-    assert.ok(lines.some(line => /已完成竖直跳10个/.test(line)));
+    assert.ok(lines.some(line => /已完成竖直跳十个/.test(line)));
     assert.equal(lines.filter(line => /已完成竖直跳/.test(line)).length, 2, 'only active and latest count should be spoken');
     await delay(3800);
     assert.equal(await page.locator('#toast').isVisible(), true, 'stage change must wait while latest count is still speaking');
-    assert.equal((await spoken(page)).filter(line => /砍树.*10个开合跳/.test(line)).length, 0);
+    assert.equal((await spoken(page)).filter(line => /砍树.*十个开合跳/.test(line)).length, 0);
     await finishSpeech(page);
     await page.locator('#toast').waitFor({state: 'hidden'});
     assert.match(await page.locator('#taskTitle').textContent(), /砍树.*开合跳/);
     lines = await spoken(page);
-    assert.match(lines.at(-1), /砍树.*10个开合跳/);
+    assert.match(lines.at(-1), /砍树.*十个开合跳/);
   });
 
   await scenario('help dialog holds a ready stage transition until it closes', {seed: makeSave('2026-11-02', {stamina: 12, counts: [9, 0, 0, 0]})}, async ({page}) => {
