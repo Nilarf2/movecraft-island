@@ -6,6 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
 import webbrowser
+from scripts.setup_assets import REQUIRED_ASSETS, valid
 
 
 def main():
@@ -15,9 +16,11 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).parent
-    required = ["vendor/vision_bundle.mjs", "vendor/wasm/vision_wasm_internal.wasm", "models/pose_landmarker_lite.task"]
-    if any(not (root / "web" / name).is_file() for name in required):
-        parser.exit(1, "Game assets are missing. Run: python3 scripts/setup_assets.py\nWindows: py -3 scripts/setup_assets.py\n")
+    invalid = [path for path in REQUIRED_ASSETS
+               if not valid(root / "web" / path, path.removeprefix("vendor/"))]
+    if invalid:
+        parser.exit(1, "Game assets are missing or invalid: " + ", ".join(invalid)
+                    + "\nRun: python3 scripts/setup_assets.py\nWindows: py -3 scripts/setup_assets.py\n")
     handler = partial(SimpleHTTPRequestHandler, directory=str(root / "web"))
     handler.func.extensions_map.update({".wasm": "application/wasm", ".mjs": "text/javascript", ".task": "application/octet-stream"})
     try:

@@ -45,8 +45,11 @@ def main():
             f"Expected: {RUNTIME / 'python.exe'}\n"
             "Run: python scripts/fetch_runtime.py"
         )
-    required = ["models/pose_landmarker_lite.task", "vendor/vision_bundle.mjs", "vendor/wasm/vision_wasm_internal.wasm"]
-    if missing := [name for name in required if not (WEB / name).is_file()]:
+    required = ["models/pose_landmarker_lite.task", "vendor/vision_bundle.mjs",
+                "vendor/wasm/vision_wasm_internal.js", "vendor/wasm/vision_wasm_internal.wasm",
+                "vendor/wasm/vision_wasm_nosimd_internal.js", "vendor/wasm/vision_wasm_nosimd_internal.wasm",
+                "vendor/wasm/vision_wasm_module_internal.js", "vendor/wasm/vision_wasm_module_internal.wasm"]
+    if missing := [name for name in required if not (WEB / name).is_file() or (WEB / name).stat().st_size == 0]:
         sys.exit("Game assets are missing: " + ", ".join(missing) + "\nRun: python scripts/setup_assets.py")
 
     for name in ("双击启动游戏.bat", "start_game.py", "README-一键版.txt"):

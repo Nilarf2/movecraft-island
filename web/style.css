@@ -11,3 +11,5 @@
 .camera-card .camera-picker{margin-top:10px}
 .login-copy .camera-picker{max-width:420px;margin-bottom:4px}
 @media(max-width:650px){.camera-picker{font-size:10px}.camera-picker select{font-size:10px;padding:6px 7px}}
+.result-link{margin-bottom:18px}.icon-btn{min-width:40px;min-height:40px;flex-shrink:0}.camera-buttons .icon-btn{flex-basis:40px}.text-btn{min-height:36px}button,input,select,a{-webkit-tap-highlight-color:transparent}input:focus-visible{outline:2px solid var(--gold);outline-offset:3px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.vitals>div{min-width:0}.vitals strong{overflow-wrap:anywhere}@media(max-width:650px){.vitals{grid-template-columns:repeat(2,minmax(0,1fr))}.vitals .health{grid-column:1/-1}.vitals strong{font-size:18px}}

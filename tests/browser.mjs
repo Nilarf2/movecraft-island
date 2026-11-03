@@ -134,7 +134,7 @@ try {
   await voicePage.waitForFunction(() => window.__spoken.length === 1);
   assert.equal(await voicePage.locator('#rulesPage').isVisible(), true);
   assert.equal(await voicePage.locator('#enterIsland').isDisabled(), true);
-  assert.match(await voicePage.evaluate(() => window.__spoken[0]), /竖直跳.*开合跳.*手臂平举.*深蹲/);
+  assert.match(await voicePage.evaluate(() => window.__spoken[0]), /竖直跳.*开合跳.*手臂平举.*深蹲.*每项从十次开始，每两天增加一次，最多二十五次/);
   await voicePage.evaluate(() => window.__finishSpeech());
   await voicePage.locator('#loginPage').waitFor({state: 'visible'});
   await voicePage.waitForFunction(() => window.__cameraRequests.length === 1);
@@ -148,13 +148,14 @@ try {
   });
   await voicePage.locator('#demoLogin').click();
   const spokenSettlement = await voicePage.evaluate(() => window.__spoken.at(-1));
-  for (const line of ['完成10个竖直跳，消耗10卡', '完成10个开合跳，消耗10卡', '完成10个手臂平举，消耗5卡', '完成10个深蹲，消耗10卡', '共消耗 35 卡', '非真实全国排名', '明天继续加油']) {
+  for (const line of ['完成十个竖直跳，消耗十卡。', '完成十个开合跳，消耗十卡。', '完成十个手臂平举，消耗五卡。', '完成十个深蹲，消耗十卡。', '共消耗三十五卡。', '非真实全国排名', '明天继续加油']) {
     assert.ok(spokenSettlement.includes(line), line);
   }
   await voicePage.locator('#settlementNext').click();
-  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*10个竖直跳.*双脚起跳/);
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*十个竖直跳.*双脚起跳/);
+  await voicePage.evaluate(() => window.__finishSpeech());
   await voicePage.locator('#demoMove').click();
-  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /已完成竖直跳1个.*做得好/);
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /已完成竖直跳一个.*做得好/);
   report.push('Settlement speaks every result and encouragement; stages and rep counts speak instructions and praise: passed');
   await voiceContext.close();
   const workerResult = await page.evaluate(async () => {

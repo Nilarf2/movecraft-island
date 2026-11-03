@@ -24,24 +24,27 @@ export class Detector {
   change(phase, now) { this.phase = phase; this.since = now; this.candidate = ''; }
   update(raw, now, aspect = 4 / 3) {
     if (!Number.isFinite(now) || (this.last !== null && now <= this.last)) return {count: 0, hint: this.hint};
-    if (this.last !== null && now - this.last > 450) this.reset();
+    if ((this.last !== null && now - this.last > 450) || (this.invalidSince !== null && now - this.invalidSince >= 250)) this.reset();
     this.last = now;
-    const l = raw?.map(p => ({x: p?.x * aspect, y: p?.y}));
+    raw = Array.isArray(raw) ? raw : [];
+    aspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 4 / 3;
+    const l = raw.map(p => ({x: p?.x * aspect, y: p?.y}));
     const visible = ids => ids.every(i => raw?.[i] && Number.isFinite(raw[i].x) && Number.isFinite(raw[i].y) && raw[i].x >= 0 && raw[i].x <= 1 && raw[i].y >= 0 && raw[i].y <= 1 && (raw[i].visibility ?? 0) >= 0.25);
     let count = 0;
     const emit = () => { if (now - this.lastRep >= 450) { count = 1; this.lastRep = now; } this.change('ready', now); };
-    const torsoIds = [11, 12, 23, 24];
-    const torso = visible(torsoIds) ? mean(dist(l[11], l[23]), dist(l[12], l[24])) : 0;
+    // A side-view squat only needs the visible leg; login only needs the right arm.
+    const torsoPairs = (this.action === 'wave' ? [[12, 24]] : [[11, 23], [12, 24]]).filter(visible);
+    const torso = torsoPairs.length && (this.action === 'squat' || this.action === 'wave' || torsoPairs.length === 2) ? mean(...torsoPairs.map(([s, h]) => dist(l[s], l[h]))) : 0;
     let valid = torso > 0.05;
-    if (this.phase !== 'ready' && now - this.since > (this.action === 'squat' ? 8000 : 3500)) this.reset();
+    if (this.phase !== 'ready' && now - this.since > (this.action === 'squat' ? 8000 : 3500)) { this.reset(); this.last = now; }
     if (valid && this.action === 'wave') {
       valid = visible([12, 14, 16]);
       if (valid) {
         const level = Math.abs(l[16].y - l[12].y) < torso * 0.65;
         if (this.phase === 'ready') {
           const start = level && Math.abs(l[14].y - l[12].y) < torso * 0.6 && l[16].x < l[12].x - torso * 0.2;
-          if (this.stable(start, 'arm', now, 100)) { this.waveStart = l[16].x; this.change('sweep', now); }
-        } else if (level && l[16].x - this.waveStart > torso * 0.45) emit();
+          if (this.stable(start, 'arm', now, 100)) { this.waveStart = l[16].x - l[12].x; this.change('sweep', now); }
+        } else if (level && l[16].x - l[12].x - this.waveStart > torso * 0.45) emit();
         this.hint = this.phase === 'sweep' ? '很好，右手保持肩高，向你的左侧挥动。' : '先将右臂向右侧平举，稍停，再向左挥动。';
       }
     } else if (valid && this.action === 'raise') {
@@ -68,7 +71,8 @@ export class Detector {
         this.hint = this.phase === 'open' ? '放下双手，双脚收回。' : feet > width * 1.3 ? '双脚打开得很好，再把双手举高一些。' : '双脚打开，同时把双手举过头顶。';
       }
     } else if (valid && this.action === 'squat') {
-      const sides = SIDES.filter(([s, , , h, k, a]) => visible([s, h, k, a]) && dist(l[h], l[k]) > torso * 0.25 && dist(l[k], l[a]) > torso * 0.25);
+      // Keep one reference side throughout a cycle, even if confidence alternates.
+      const sides = SIDES.filter(([s, , , h, k, a]) => (this.phase === 'ready' || h === this.squatSide) && visible([s, h, k, a]) && dist(l[h], l[k]) > torso * 0.25 && dist(l[k], l[a]) > torso * 0.25);
       valid = sides.length > 0;
       if (valid) {
         const best = sides.sort((a, b) => Math.min(...b.filter((_, i) => [0, 3, 4, 5].includes(i)).map(i => raw[i].visibility)) - Math.min(...a.filter((_, i) => [0, 3, 4, 5].includes(i)).map(i => raw[i].visibility)))[0];
@@ -85,7 +89,7 @@ export class Detector {
         if (!this.ground) {
           this.samples.push({time: now, left: l[27].y, right: l[28].y, hip, torso});
           this.samples = this.samples.filter(x => now - x.time < 900);
-          if (this.samples.length >= 4 && now - this.samples[0].time >= 400 && Math.max(...this.samples.map(x => x.hip)) - Math.min(...this.samples.map(x => x.hip)) < torso * 0.12) {
+          if (this.samples.length >= 3 && now - this.samples[0].time >= 400 && ['left', 'right', 'hip'].every(key => Math.max(...this.samples.map(x => x[key])) - Math.min(...this.samples.map(x => x[key])) < torso * 0.12)) {
             const avg = key => mean(...this.samples.map(x => x[key]));
             this.ground = {left: avg('left'), right: avg('right'), hip: avg('hip'), torso: avg('torso')};
           }

@@ -152,3 +152,115 @@ test('stable poses and full raise cycles behave consistently from five to thirty
     assert.equal(r.counts,0,`${action} must not count a static pose`);
   }
 });
+
+test('a recovery frame cancels motions after an overlong loss of tracking', () => {
+  const r=runner('raise'); r.feed(standing()); r.feed(raised());
+  r.feed([],1);
+  r.feed(standing(),3,300); assert.equal(r.counts,0);
+  r.feed(raised()); r.feed(standing()); assert.equal(r.counts,1);
+});
+
+test('sideways body motion and the opposite wave direction cannot confirm login', () => {
+  const r=runner('wave'), start=standing();
+  start[14]={x:.4,y:.25,visibility:1}; start[16]={x:.3,y:.25,visibility:1};
+  r.feed(start);
+  const sideways=start.map(p=>({...p,x:p.x+.12}));
+  r.feed(sideways); assert.equal(r.counts,0);
+  const wrongDirection=structuredClone(start); wrongDirection[16].x=.1;
+  r.feed(wrongDirection); assert.equal(r.counts,0);
+  const correct=structuredClone(start); correct[16].x=.55;
+  r.feed(correct); assert.equal(r.counts,1);
+});
+
+test('left-arm-only waving does not confirm, and the visible right side is sufficient', () => {
+  const r=runner('wave'), left=standing();
+  left[13]={x:.7,y:.25,visibility:1}; left[15]={x:.8,y:.25,visibility:1};
+  r.feed(left); left[15].x=.2; r.feed(left); assert.equal(r.counts,0);
+  const start=standing();
+  for (const id of [11,13,15,23]) start[id].visibility=0;
+  start[14]={x:.4,y:.25,visibility:1}; start[16]={x:.3,y:.25,visibility:1};
+  assert.equal(r.feed(start).valid,true);
+  const end=structuredClone(start); end[16].x=.55;
+  r.feed(end); assert.equal(r.counts,1);
+});
+
+test('a side-view squat works with only one visible torso and leg', () => {
+  for (const hiddenSide of [[11,23,25,27],[12,24,26,28]]) {
+    const hide=p=>p.map((point,i)=>({...point,visibility:hiddenSide.includes(i)?0:1}));
+    const r=runner('squat');
+    assert.equal(r.feed(hide(standing())).valid,true);
+    r.feed(hide(crouched())); assert.equal(r.counts,0);
+    r.feed(hide(standing())); assert.equal(r.counts,1);
+  }
+});
+
+test('squats keep the same reference leg when opposite-side confidence improves', () => {
+  const r=runner('squat'); r.feed(standing());
+  const favorRight=p=>p.map((point,i)=>({...point,visibility:[11,23,25,27].includes(i)?.3:1}));
+  r.feed(favorRight(crouched())); assert.equal(r.counts,0);
+  r.feed(favorRight(standing())); assert.equal(r.counts,1);
+  const lost=runner('squat'); lost.feed(standing());
+  const hideLeft=crouched().map((point,i)=>({...point,visibility:[11,23,25,27].includes(i)?0:1}));
+  assert.equal(lost.feed(hideLeft,1).valid,false);
+  lost.feed(hideLeft,3); lost.feed(standing()); assert.equal(lost.counts,0);
+});
+
+test('jumps do not calibrate the ground while either foot is moving', () => {
+  const r=runner('jump');
+  for (let i=0;i<12;i++) {
+    const p=standing(); if (i%2) p[27].y-=.07;
+    r.feed(p,1);
+  }
+  assert.equal(r.d.ground,null); assert.equal(r.counts,0);
+  r.feed(standing(),10); assert.ok(r.d.ground); assert.equal(r.counts,0);
+});
+
+test('complete cycles work from three to thirty FPS, including jump calibration', () => {
+  for (const fps of [3,5,10,15,30]) {
+    const step=1000/fps, frames=Math.max(3,Math.ceil(fps*.6));
+    for (const [action,pose] of [['raise',raised],['jack',openJack],['squat',crouched]]) {
+      const r=runner(action); r.feed(standing(),frames,step); r.feed(pose(),frames,step);
+      assert.equal(r.counts,0,`${action}, ${fps} FPS before return`);
+      r.feed(standing(),frames,step); assert.equal(r.counts,1,`${action}, ${fps} FPS`);
+    }
+    const jump=runner('jump'); jump.feed(standing(),Math.max(4,Math.ceil(fps)),step);
+    assert.ok(jump.d.ground,`${fps} FPS calibration`);
+    jump.feed(shifted(standing(),-.04),Math.max(1,Math.ceil(fps*.2)),step);
+    assert.equal(jump.counts,0);
+    jump.feed(standing(),frames,step); assert.equal(jump.counts,1,`jump, ${fps} FPS`);
+  }
+});
+
+test('ordinary landmark jitter cannot count a stationary pose', () => {
+  for (const action of ['jump','jack','raise','squat','wave']) {
+    const r=runner(action); r.feed(standing(),10);
+    for (let i=0;i<100;i++) {
+      const p=standing().map((point,j)=>({...point,x:point.x+Math.sin(i+j)*.002,y:point.y+Math.cos(i+j)*.003}));
+      r.feed(p,1);
+    }
+    assert.equal(r.counts,0,action);
+  }
+});
+
+test('malformed landmarks and invalid aspect ratios do not throw', () => {
+  for (const raw of [undefined,null,{},[null],['invalid']]) {
+    const d=new Detector('raise'); assert.equal(d.update(raw,100).valid,false);
+  }
+  for (const aspect of [0,-1,NaN,Infinity]) {
+    const d=new Detector('raise'); assert.equal(d.update(standing(),100,aspect).valid,true);
+  }
+});
+
+test('phase expiry keeps timestamp ordering intact', () => {
+  const d=new Detector('raise');
+  for (const [pose,now] of [[standing(),100],[standing(),200],[raised(),300],[raised(),400]]) d.update(pose,now);
+  assert.equal(d.phase,'up');
+  let expiredAt;
+  for (let now=500;now<5000;now+=100) {
+    d.update(raised(),now);
+    if (d.phase==='ready') { expiredAt=now; break; }
+  }
+  assert.ok(expiredAt);
+  assert.equal(d.last,expiredAt);
+  d.update(standing(),expiredAt-1); assert.equal(d.last,expiredAt);
+});
