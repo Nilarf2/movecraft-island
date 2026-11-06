@@ -1,0 +1,3 @@
+# Local development database (python3 -m server.serve without DB_PATH)
+.data/
+__pycache__/

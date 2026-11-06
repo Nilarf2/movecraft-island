@@ -1,0 +1,54 @@
+# MoveCraft account and leaderboard API. Run from this directory:
+#   docker compose up -d
+# No build step: the cached python:3.12-alpine image runs the code mounted read-only.
+# The data directory must exist on the host and belong to uid/gid 10001 (see README.md).
+name: movecraft-api
+services:
+  api:
+    image: python:3.12-alpine
+    container_name: movecraft-api
+    user: "10001:10001"
+    working_dir: /app
+    command: ["python", "-m", "server.serve"]
+    environment:
+      DB_PATH: /data/movecraft.sqlite3
+      HOST: 0.0.0.0          # inside the container; the published port below is loopback-only
+      PORT: "8787"
+      TRUST_PROXY: "1"       # Caddy on the host appends X-Forwarded-For; only the rightmost entry is used
+      ALLOWED_ORIGINS: ""    # same origin in production; list extra origins comma-separated
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PYTHONNOUSERSITE: "1"
+    volumes:
+      - ./:/app/server:ro
+      # create_host_path: false fails loudly if the directory is missing instead of making a root-owned one
+      - type: bind
+        source: ${MOVECRAFT_DATA:-/var/lib/movecraft-island}
+        target: /data
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:8787:8787"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
