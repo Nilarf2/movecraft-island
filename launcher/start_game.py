@@ -4,7 +4,11 @@
 Runs with the bundled Python runtime so the recipient installs nothing:
 finds a free port, serves the game, and opens the browser. Closing the
 console window stops the server.
+
+    start_game.py                       opens /           (the personal game)
+    start_game.py --path /stage.html    opens the big-screen page
 """
+import argparse
 from functools import partial
 from hashlib import sha256
 from http.client import HTTPConnection, HTTPException
@@ -15,6 +19,7 @@ from pathlib import Path
 import sys
 import threading
 import traceback
+from urllib.parse import unquote, urlsplit
 import webbrowser
 
 ROOT = Path(__file__).resolve().parent
@@ -100,6 +105,24 @@ def acquire_server(web=WEB, ports=PORTS):
     return None, None
 
 
+def page_target(raw):
+    """Check --path: a page of this local server such as /stage.html, never another site.
+
+    Returns (path for the URL, file name under web/)."""
+    text = (raw or "/").strip()
+    if not text.startswith("/"):
+        text = "/" + text
+    parts = urlsplit(text)
+    if (text.startswith("//") or "://" in text or "\\" in text or parts.scheme or parts.netloc
+            or any(char.isspace() or ord(char) < 32 for char in text)
+            or ".." in parts.path.split("/")):
+        raise ValueError(raw)
+    page = unquote(parts.path[1:])
+    if page == "" or page.endswith("/"):
+        page += "index.html"
+    return text, page
+
+
 def banner(url):
     line = "=" * 46
     print(line)
@@ -119,13 +142,29 @@ def banner(url):
     print(line, flush=True)
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="MoveCraft 一键启动")
+    parser.add_argument("--path", default="/", help="要打开的页面，例如 /stage.html（默认 /）")
+    args = parser.parse_args([] if argv is None else argv)
+    try:
+        path, page = page_target(args.path)
+    except ValueError:
+        print("启动参数 --path 无效：" + str(args.path))
+        print("只能填本程序里的页面路径，例如 /stage.html。")
+        return 2
+
     missing = [name for name in REQUIRED
                if not (WEB / name).is_file() or (WEB / name).stat().st_size == 0]
     if missing:
         print("游戏资源缺失，无法启动：")
         for name in missing:
             print("  - web/" + name)
+        print()
+        print("请重新解压完整的压缩包，不要只复制部分文件。")
+        input("按回车键关闭…")
+        return 1
+    if not (WEB / page).is_file():
+        print("找不到要打开的页面：web/" + page)
         print()
         print("请重新解压完整的压缩包，不要只复制部分文件。")
         input("按回车键关闭…")
@@ -138,7 +177,7 @@ def main():
         input("按回车键关闭…")
         return 1
 
-    url = "http://localhost:" + str(port)
+    url = "http://localhost:" + str(port) + ("" if path == "/" else path)
     if server is None:
         print("同一文件夹的游戏已经运行，正在打开原来的游戏地址：" + url, flush=True)
         print("存档继续使用原地址。请保持原来的启动窗口开着。", flush=True)
@@ -161,7 +200,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        sys.exit(main(sys.argv[1:]))
     except Exception:
         print("\n启动时出现意外错误：\n")
         traceback.print_exc()
