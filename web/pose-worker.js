@@ -13,7 +13,7 @@ self.onmessage = async ({data}) => {
       try {
         const begin = performance.now();
         const result = landmarker.detectForVideo(data.frame, data.timestamp);
-        self.postMessage({type: 'pose', landmarks: result.landmarks[0] || [], timestamp: data.timestamp, latency: performance.now() - begin});
+        self.postMessage({type: 'pose', landmarks: result.landmarks[0] || [], worldLandmarks: result.worldLandmarks?.[0] || [], timestamp: data.timestamp, latency: performance.now() - begin});
       } finally { data.frame.close(); }
     }
   } catch (e) { self.postMessage({type: 'error', message: String(e.message || e)}); }

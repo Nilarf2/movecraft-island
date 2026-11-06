@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小人调试页 · MoveCraft</title>
+<link rel="icon" href="favicon.svg">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #7cc4ef; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 12px; top: 10px; color: #12324a; font-size: 14px; line-height: 1.5; background: #ffffffcc; border-radius: 8px; padding: 6px 10px; max-width: 46ch; }
+  #hud[hidden] { display: none; }
+  #preview { position: fixed; right: 12px; bottom: 12px; width: 220px; border-radius: 8px; transform: scaleX(-1); background: #0003; }
+  #preview[hidden] { display: none; }
+</style>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.js"}}</script>
+</head>
+<body>
+<div id="hud"></div>
+<video id="preview" playsinline muted hidden></video>
+<script type="module">
+import * as THREE from 'three';
+import {createAvatar, samplePose, ACTIONS, SAMPLE_POSES} from './world/avatar.js';
+import {PALETTES} from './world/palettes.js';
+
+// 参数：?demo=jump 播放示范动作；?pose=squat 用固定的 33 点姿态；默认用摄像头实时驱动。
+// ?mirror=0 关闭镜像；?src=2d 只用 2D 点；?view=front 正面机位；?ground=grass 草地；?manual=1 由脚本推进时间；?hud=0 隐藏文字。
+const q = new URLSearchParams(location.search);
+const demo = ACTIONS.includes(q.get('demo')) ? q.get('demo') : null;
+const poseName = SAMPLE_POSES.includes(q.get('pose')) ? q.get('pose') : null;
+const mirror = q.get('mirror') !== '0', only2d = q.get('src') === '2d', manual = q.get('manual') === '1';
+const pal = PALETTES.day, hud = document.getElementById('hud');
+hud.hidden = q.get('hud') === '0';
+const say = text => { hud.textContent = text; };
+
+const renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(pal.sky.mid);
+scene.add(new THREE.HemisphereLight(pal.hemi.sky, pal.hemi.ground, pal.hemi.intensity));
+const sun = new THREE.DirectionalLight(pal.sun.color, pal.sun.intensity);
+const az = pal.sun.azimuth * Math.PI / 180, el = pal.sun.elevation * Math.PI / 180;
+sun.position.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(10);
+scene.add(sun);
+const groundColor = q.get('ground') === 'grass' ? pal.slots.grass : pal.slots.sand;
+const ground = new THREE.Mesh(new THREE.CircleGeometry(4, 18), new THREE.MeshLambertMaterial({color: groundColor, flatShading: true}));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+
+const HEIGHT = 1.8;
+const avatar = createAvatar(THREE, {height: HEIGHT, palette: 'day', mirror});
+scene.add(avatar.group);
+
+// 默认机位和岛上一样：右前方约 35°，小人约占画面高度的 40%。?view=front 正对小人；?zoom=1.6 拉近。
+const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.1, 100);
+const zoom = Math.max(0.5, Number(q.get('zoom')) || 1), dist = 8.4 / zoom;
+const yaw = q.get('view') === 'front' ? 0 : 35 * Math.PI / 180;
+camera.position.set(Math.sin(yaw) * dist, HEIGHT * 0.5 + dist * 0.2, Math.cos(yaw) * dist);
+camera.lookAt(0, HEIGHT * 0.48, 0);
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+let sim = 0;
+const fixed = poseName ? {base: samplePose('stand'), main: samplePose(poseName)} : null;
+// 固定姿态：先站 0.6 秒让跳跃估计拿到站立基线，再切到目标姿态，每 33 ms 送一帧（约 30 FPS）。
+let nextFeed = 0;
+function drive(t) {
+  if (!fixed) return;
+  while (nextFeed <= t) {
+    const p = nextFeed < 0.6 ? fixed.base : fixed.main;
+    avatar.setPose(p.landmarks, only2d ? [] : p.worldLandmarks, nextFeed * 1000);
+    nextFeed += 1 / 30;
+  }
+}
+function step(dt) { sim += dt; drive(sim); avatar.update(dt, sim); }
+const render = () => renderer.render(scene, camera);
+const info = () => { const s = avatar.stats(); return `绘制 ${s.drawCalls} 次 · 三角形 ${s.triangles}`; };
+
+if (demo) { avatar.setDemo(demo); say(`示范动作：${demo}。按 1–6 切换，按 F 闪光。${info()}`); }
+else if (fixed) say(`固定姿态：${poseName}${only2d ? '（只用 2D 点）' : ''}${mirror ? '' : '（不镜像）'}。${info()}`);
+else startCamera().catch(e => say(`没有拿到摄像头：${e.message || e}。可以加 ?demo=wave 看示范动作。`));
+
+addEventListener('keydown', e => {
+  const i = '123456'.indexOf(e.key);
+  if (i >= 0) { avatar.setDemo(ACTIONS[i]); say(`示范动作：${ACTIONS[i]}。${info()}`); }
+  if (e.key === 'f' || e.key === 'F') avatar.flash('all');
+});
+
+async function startCamera() {
+  say('正在打开摄像头……');
+  const stream = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480, facingMode: 'user'}, audio: false});
+  const video = document.getElementById('preview'); video.srcObject = stream; video.hidden = false; await video.play();
+  const worker = new Worker(new URL('./pose-worker.js', import.meta.url), {type: 'module'});
+  await new Promise((resolve, reject) => {
+    worker.onerror = e => reject(new Error(e.message || '识别模块无法启动'));
+    worker.onmessage = ({data}) => data.type === 'ready' ? resolve() : data.type === 'error' && reject(new Error(data.message));
+    worker.postMessage({type: 'init'});
+  });
+  say('摄像头已开启：站到镜头前，小人会像照镜子一样跟着你动。');
+  let busy = false, last = -1;
+  worker.onmessage = ({data}) => {
+    if (data.type === 'error') { busy = false; say('识别出错：' + data.message); return; }
+    if (data.type !== 'pose') return;
+    busy = false;
+    avatar.setPose(data.landmarks, only2d ? [] : data.worldLandmarks, data.timestamp);
+  };
+  const pump = () => {
+    if (!busy && video.readyState >= 2 && video.currentTime !== last) {
+      busy = true; last = video.currentTime;
+      createImageBitmap(video).then(frame => worker.postMessage({type: 'frame', frame, timestamp: performance.now()}, [frame])).catch(() => { busy = false; });
+    }
+    requestAnimationFrame(pump);
+  };
+  pump();
+}
+
+window.__lab = {avatar, renderer, scene, camera, advance(sec, dt = 1 / 60) { for (let t = 0; t < sec - 1e-9; t += dt) step(dt); render(); return avatar.stats(); }};
+if (!manual) {
+  let prev = performance.now();
+  const loop = now => { step(Math.min(0.1, (now - prev) / 1000)); prev = now; render(); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+} else render();
+</script>
+</body>
+</html>

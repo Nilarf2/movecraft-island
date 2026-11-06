@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小岛样稿</title>
+<link rel="stylesheet" href="./stage/tokens.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--mc-ink); font-family: var(--mc-font); color: var(--mc-text); }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .hud { position: fixed; inset: 0; pointer-events: none; }
+  .top { position: absolute; left: 0; right: 0; top: 0; height: 14vh; display: flex; align-items: center; justify-content: space-between; padding: 0 3vw; box-sizing: border-box; }
+  .panel { background: var(--mc-panel); border: 1px solid var(--mc-line); border-radius: var(--mc-radius); box-shadow: var(--mc-shadow); }
+  .stage { display: flex; align-items: center; gap: 1.6vh; padding: 1.4vh 2.6vh; font-size: var(--mc-m); font-weight: 700; }
+  .dots { display: flex; gap: 0.9vh; }
+  .dots i { width: 1.8vh; height: 1.8vh; border-radius: 50%; background: rgba(169, 206, 198, 0.35); display: block; }
+  .dots i.done { background: var(--mc-accent-strong); } .dots i.now { background: var(--mc-warm); box-shadow: 0 0 0 0.5vh rgba(255, 211, 110, 0.3); }
+  .move { color: var(--mc-accent); font-weight: 600; }
+  .res { display: flex; gap: 2.4vh; padding: 1.4vh 2.6vh; font-size: var(--mc-m); font-family: var(--mc-num); font-weight: 700; }
+  .res span b { font-family: var(--mc-font); color: var(--mc-muted); font-weight: 600; margin-right: 0.6vh; font-size: var(--mc-s); }
+  .res .hp { color: var(--mc-warm); }
+  .count { position: absolute; right: 4vw; top: 34vh; width: 30vh; height: 30vh; display: grid; place-items: center; }
+  .count svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .count .num { font-family: var(--mc-num); font-size: 10vh; font-weight: 800; line-height: 1; text-shadow: 0 0.6vh 2vh rgba(0, 30, 30, 0.45); }
+  .count .num small { font-size: 5vh; color: var(--mc-muted); }
+  .count .lab { position: absolute; bottom: 4.4vh; font-size: var(--mc-s); color: var(--mc-muted); font-weight: 600; }
+  .bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 18vh; display: flex; align-items: center; justify-content: center; }
+  .tip { padding: 1.8vh 4vh; font-size: var(--mc-m); font-weight: 600; }
+  .guide { position: fixed; left: 0; right: 0; border-top: 2px dashed rgba(255, 60, 120, 0.85); pointer-events: none; }
+  .bracket { position: fixed; left: 47vw; width: 6vw; border: 2px solid rgba(255, 60, 120, 0.85); border-left: 0; border-right: 0; pointer-events: none; }
+  #err { position: fixed; left: 2vh; bottom: 2vh; font: 16px monospace; color: #ff8f7e; white-space: pre; }
+</style>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.js"}}</script>
+</head>
+<body>
+<div class="hud" id="hud"></div>
+<div id="err"></div>
+<script type="module">
+import * as THREE from 'three';
+import {createIsland, ZONE_NAMES} from './world/island.js';
+
+// URL: palette=day|deck|sunset  zone=0..3|overview  shelter=0..6  quality=low|medium|high
+//      progress=0..1 (current zone)  hud=0|1  guides=0|1  avatar=0|1  attract=1  celebrate=1  t=seconds to settle
+const q = new URLSearchParams(location.search);
+const num = (k, d) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
+const zoneParam = q.get('zone') ?? '3';
+const zone = zoneParam === 'overview' ? -1 : Math.max(0, Math.min(3, Math.round(+zoneParam) || 0));
+const shelter = Math.max(0, Math.min(6, Math.round(num('shelter', 3))));
+const progress = Math.max(0, Math.min(1, num('progress', 0.7)));
+const quality = ['low', 'medium', 'high'].includes(q.get('quality')) ? q.get('quality') : 'high';
+const STAGE = [
+  {name: '摘椰子', move: '竖直跳', tip: '双脚起跳，再平稳落地'},
+  {name: '砍树', move: '开合跳', tip: '双脚打开时双手举过头'},
+  {name: '耕种', move: '手臂平举', tip: '双臂向两侧平举至肩高'},
+  {name: '建房', move: '深蹲', tip: '屈膝下蹲，再站起'},
+];
+const res = {water: num('water', 4), wood: num('wood', 8), food: num('food', 4)}, hp = num('hp', 86), target = 10;
+
+const renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = quality !== 'low';
+renderer.shadowMap.type = THREE.PCFShadowMap;
+document.body.prepend(renderer.domElement);
+
+const island = createIsland(THREE, {palette: q.get('palette') || 'day', quality, zone: zone < 0 ? 0 : zone, reducedMotion: q.get('reduced') === '1'});
+island.resize(innerWidth, innerHeight);
+if (zone < 0) island.focusZone(-1);
+island.setShelter(shelter);
+island.setResources(res);
+for (let s = 0; s < 4; s++) {
+  const p = zone < 0 ? (s < 3 ? 1 : 0) : s < zone ? 1 : s === zone ? (s === 3 && !q.has('progress') ? 0 : progress) : 0;
+  island.setProgress(s, Math.round(p * target), target);
+}
+if (q.get('attract') === '1') island.setAttract(true);
+window.__island = island; window.__renderer = renderer;
+
+// Avatar: the real module when it loads, otherwise a stand-in of the same height.
+let avatar = null;
+try {
+  const mod = await import('./world/avatar.js');
+  if (mod.createAvatar) { avatar = mod.createAvatar(THREE, {height: island.avatarHeight, palette: island.palette, mirror: true}); avatar.setDemo?.(q.get('demo') || 'idle'); }
+} catch (e) { console.warn('avatar.js unavailable, using stand-in:', e.message); }
+if (!avatar) {
+  const g = new THREE.Group(), h = island.avatarHeight, mat = c => new THREE.MeshLambertMaterial({color: c, flatShading: true});
+  const part = (geo, c, x, y, z) => { const m = new THREE.Mesh(geo, mat(c)); m.position.set(x * h, y * h, z * h); m.castShadow = true; g.add(m); return m; };
+  for (const s of [-1, 1]) { part(new THREE.BoxGeometry(0.11 * h, 0.42 * h, 0.12 * h), '#2f5d8a', s * 0.07, 0.21, 0); part(new THREE.BoxGeometry(0.08 * h, 0.36 * h, 0.08 * h), '#ff9a5c', s * 0.2, 0.6, 0); }
+  part(new THREE.BoxGeometry(0.3 * h, 0.34 * h, 0.17 * h), '#ff7a3d', 0, 0.6, 0);
+  part(new THREE.IcosahedronGeometry(0.15 * h, 1), '#ffd9b8', 0, 0.9, 0);
+  avatar = {group: g, update() {}};
+}
+if (q.get('avatar') !== '0' && zone >= 0) {
+  const a = island.anchor(zone); avatar.group.position.copy(a.position); avatar.group.rotation.y = a.facing; island.scene.add(avatar.group);
+}
+
+// Static HUD (sample values), plus optional guides for the 14 % / 18 % HUD bands and the 40 % avatar band.
+const z = Math.max(0, zone), st = STAGE[z], done = Math.round((zone < 0 ? 0 : progress) * target);
+const hud = document.getElementById('hud');
+if (q.get('hud') !== '0') hud.innerHTML = `
+  <div class="top">
+    <div class="panel stage"><div class="dots">${STAGE.map((_, i) => `<i class="${i < z ? 'done' : i === z ? 'now' : ''}"></i>`).join('')}</div>
+      <span>${st.name}</span><span class="move">${st.move}</span></div>
+    <div class="panel res"><span><b>淡水</b>${res.water}</span><span><b>木材</b>${res.wood}</span><span><b>食物</b>${res.food}</span><span class="hp"><b>生命</b>${hp}</span></div>
+  </div>
+  <div class="count"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="rgba(5,38,42,0.72)" stroke="rgba(123,224,195,0.25)" stroke-width="7"/>
+    <circle cx="50" cy="50" r="44" fill="none" stroke="var(--mc-accent-strong)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(done / target * 276.5).toFixed(1)} 400"/></svg>
+    <div class="num">${done}<small> / ${target}</small></div><div class="lab">${st.move}</div></div>
+  <div class="bottom"><div class="panel tip">${st.tip}</div></div>`;
+if (q.get('guides') === '1') {
+  for (const y of [14, 82, 28, 68]) { const d = document.createElement('div'); d.className = 'guide'; d.style.top = y + 'vh'; document.body.append(d); }
+}
+
+const settle = num('t', 3), still = q.get('still') === '1';
+for (let i = 0; i < settle * 60; i++) { island.update(1 / 60); avatar.update?.(1 / 60, i / 60); }
+if (q.get('fx') === '1' && zone >= 0) { island.rep(zone, done + 1, target); for (let i = 0; i < 14; i++) island.update(1 / 60); }
+if (q.get('celebrate') === '1') { island.celebrate(); for (let i = 0; i < 90; i++) island.update(1 / 60); }
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!still) { island.update(dt, now / 1000); avatar.update?.(dt, now / 1000); }
+  renderer.render(island.scene, island.camera);
+  window.__frames = (window.__frames || 0) + 1;
+  if (window.__frames === 2) { window.__stats = island.stats(renderer); window.__ready = true; }
+  if (!still || window.__frames < 3) requestAnimationFrame(frame);
+}
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); island.resize(innerWidth, innerHeight); });
+addEventListener('error', e => { document.getElementById('err').textContent += e.message + '\n'; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
