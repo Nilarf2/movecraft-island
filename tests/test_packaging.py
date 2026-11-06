@@ -1,14 +1,18 @@
 """Offline distribution and loopback launcher regressions; no network downloads."""
 from contextlib import contextmanager
 from functools import partial
+from http.client import HTTPConnection
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import io
+import json
+import os
 from pathlib import Path
 import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 from zipfile import ZipFile
 
 
@@ -40,6 +44,17 @@ def serving(web, handler=launcher.Handler):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def request(port, method, path, body=None):
+    """One loopback request, bypassing any proxy the machine may have configured."""
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request(method, path, body=body)
+        response = connection.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+    finally:
+        connection.close()
 
 
 class OfflinePackageTests(unittest.TestCase):
@@ -136,6 +151,10 @@ class LauncherTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.web = Path(self.temporary.name) / "web"
         self.web.mkdir()
+        # These tests exercise the static server only; do not create a database.
+        self.start_api = patch.object(launcher, "start_api", return_value=None)
+        self.start_api.start()
+        self.addCleanup(self.start_api.stop)
 
     def prepare_assets(self):
         for name in launcher.REQUIRED + ["index.html"]:
@@ -218,6 +237,9 @@ class LauncherPathTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.web = Path(self.temporary.name) / "web"
+        self.start_api = patch.object(launcher, "start_api", return_value=None)
+        self.start_api.start()
+        self.addCleanup(self.start_api.stop)
         for name in launcher.REQUIRED + ["index.html", "stage.html", "perf-lab.html"]:
             path = self.web / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,6 +307,89 @@ class LauncherPathTests(unittest.TestCase):
         self.assertEqual(launcher.page_target("stage.html"), ("/stage.html", "stage.html"))
 
 
+class RecordingApi:
+    """Stands in for the account App: records what the launcher forwarded to it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def handle(self, method, path, headers, body, client_ip):
+        self.calls.append((method, urlsplit(path).path))
+        return 200, [("Content-Type", "application/json; charset=utf-8")], b'{"service":"ok"}'
+
+
+class LauncherApiTests(unittest.TestCase):
+    """/api/v1/ belongs to the embedded account server; every other path stays static."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.web = Path(self.temporary.name) / "web"
+        self.web.mkdir()
+        (self.web / "index.html").write_bytes(b"static page")
+        patcher = patch.object(launcher.Handler, "api", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_only_api_paths_reach_the_account_server(self):
+        api = RecordingApi()
+        with patch.object(launcher.Handler, "api", api), serving(self.web) as port:
+            status, headers, body = request(port, "GET", "/api/v1/health?probe=1")
+            self.assertEqual(status, 200)
+            self.assertEqual(headers.get("Content-Type"), "application/json; charset=utf-8")
+        self.assertEqual(json.loads(body), {"service": "ok"})
+        self.assertEqual(api.calls, [("GET", "/api/v1/health")])
+        with patch.object(launcher.Handler, "api", api), serving(self.web) as port:
+            status, _, body = request(port, "GET", "/index.html")
+        self.assertEqual((status, body), (200, b"static page"))
+        self.assertEqual(api.calls, [("GET", "/api/v1/health")], "static pages must stay static")
+
+    def test_request_without_a_started_account_server_is_a_503_json(self):
+        with serving(self.web) as port:
+            for method, path in (("GET", "/api/v1/health"), ("POST", "/api/v1/auth/login"),
+                                 ("DELETE", "/api/v1/me"), ("HEAD", "/api/v1/leaderboard")):
+                with self.subTest(method=method):
+                    body = b"{}" if method in ("POST", "DELETE") else None
+                    status, headers, payload = request(port, method, path, body)
+                    self.assertEqual(status, 503)
+                    self.assertEqual(headers.get("Content-Type"), "application/json; charset=utf-8")
+                    if method == "HEAD":
+                        self.assertEqual(payload, b"")
+                    else:
+                        self.assertEqual(json.loads(payload)["error"]["code"], "server")
+
+
+class LauncherDatabaseTests(unittest.TestCase):
+    """The account database lives in the package folder, or in the user profile if that is read-only."""
+
+    def test_writable_package_folder_is_used_as_is(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "package/data/movecraft.sqlite3"
+            with patch.object(launcher, "DB_PATH", database):
+                self.assertEqual(launcher.database_path(), database)
+            self.assertTrue(database.parent.is_dir(), "the package data folder must be created")
+
+    def test_unwritable_package_folder_falls_back_to_local_appdata(self):
+        original = Path.mkdir
+        with tempfile.TemporaryDirectory() as temporary:
+            package_data = Path(temporary) / "package/data"
+            database = package_data / "movecraft.sqlite3"
+            local = Path(temporary) / "LocalAppData"
+
+            def mkdir(path, *args, **kwargs):
+                if Path(path) == package_data:
+                    raise OSError(13, "package folder is read-only")
+                return original(path, *args, **kwargs)
+
+            with patch.object(launcher, "DB_PATH", database), \
+                    patch.object(launcher.Path, "mkdir", mkdir), \
+                    patch.dict(os.environ, {"LOCALAPPDATA": str(local)}):
+                expected = local / "MoveCraft" / "movecraft.sqlite3"
+                self.assertEqual(launcher.database_path(), expected)
+            self.assertTrue(expected.parent.is_dir())
+            self.assertFalse(package_data.exists())
+
+
 class ShortcutTests(unittest.TestCase):
     """The .bat files must run on Chinese Windows, whose console starts in GBK (code page 936)."""
     SHORTCUTS = {"大屏模式.bat": "/stage.html", "性能测试.bat": "/perf-lab.html"}
@@ -327,9 +432,17 @@ class OneClickOutputTests(unittest.TestCase):
         (root / "launcher/__pycache__/start_game.pyc").write_bytes(b"cache")
         for name in oneclick.LAUNCHER_FILES:
             (root / "launcher" / name).write_bytes(b"launcher")
+        (root / "server").mkdir()
+        for name in ("__init__.py", "app.py", "serve.py"):
+            (root / "server" / name).write_bytes(b"server")
+        (root / "server/tests").mkdir()
+        (root / "server/tests/test_app.py").write_bytes(b"server test")
+        (root / "server/__pycache__").mkdir()
+        (root / "server/__pycache__/app.pyc").write_bytes(b"cache")
         self.default = root / "deliverables/movecraft-island-oneclick.zip"
         for name, value in (("ROOT", root), ("RUNTIME", root / "runtime"), ("WEB", root / "web"),
-                            ("LAUNCHER", root / "launcher"), ("OUTPUT", self.default)):
+                            ("LAUNCHER", root / "launcher"), ("SERVER", root / "server"),
+                            ("OUTPUT", self.default)):
             patcher = patch.object(oneclick, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -379,6 +492,24 @@ class OneClickOutputTests(unittest.TestCase):
                 self.build([])
         self.assertEqual(self.default.read_bytes(), b"previous package")
         self.assertEqual(list(self.default.parent.iterdir()), [self.default])
+
+    def test_embedded_account_server_ships_without_its_tests_or_caches(self):
+        self.build([])
+        with ZipFile(self.default) as archive:
+            names = set(archive.namelist())
+        folder = oneclick.FOLDER + "/server/"
+        self.assertTrue({folder + name for name in ("__init__.py", "app.py", "serve.py")} <= names)
+        self.assertEqual([name for name in names
+                          if "__pycache__" in name or name.startswith(folder + "tests/")], [],
+                         "the launcher imports server/, so its tests and caches must not ship")
+
+    def test_missing_account_server_stops_the_build_with_a_clear_error(self):
+        self.default.parent.mkdir()
+        self.default.write_bytes(b"previous package")
+        (self.root / "server/app.py").unlink()
+        with self.assertRaisesRegex(SystemExit, r"Account server file missing: .*server/app\.py"):
+            self.build([])
+        self.assertEqual(self.default.read_bytes(), b"previous package")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ The result is a zip that contains:
   - a bundled, embedded Python 3.11 runtime (no Python install needed)
   - start_game.py, a friendly launcher that picks a free port and opens the browser
   - 双击启动游戏.bat (personal game), 大屏模式.bat (/stage.html), 性能测试.bat (/perf-lab.html)
+  - server/, the local account and leaderboard API the launcher embeds
   - README-一键版.txt
 
 The embedded runtime is not committed to git. Fetch it once before building:
@@ -26,10 +27,15 @@ ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "launcher"
 RUNTIME = ROOT / "runtime"
 WEB = ROOT / "web"
+SERVER = ROOT / "server"
 OUTPUT = ROOT / "deliverables/movecraft-island-oneclick.zip"
 FOLDER = "MoveCraft-体感荒岛"
-SKIP_PARTS = {"__pycache__"}
+SKIP_PARTS = {"__pycache__", "tests", ".data"}
 LAUNCHER_FILES = ("双击启动游戏.bat", "大屏模式.bat", "性能测试.bat", "start_game.py", "README-一键版.txt")
+REQUIRED_ASSETS = ["models/pose_landmarker_lite.task", "vendor/vision_bundle.mjs",
+                   "vendor/wasm/vision_wasm_internal.js", "vendor/wasm/vision_wasm_internal.wasm",
+                   "vendor/wasm/vision_wasm_nosimd_internal.js", "vendor/wasm/vision_wasm_nosimd_internal.wasm",
+                   "vendor/wasm/vision_wasm_module_internal.js", "vendor/wasm/vision_wasm_module_internal.wasm"]
 
 
 def add_tree(archive, source, prefix):
@@ -53,18 +59,17 @@ def main(argv=None):
             f"Expected: {RUNTIME / 'python.exe'}\n"
             "Run: python scripts/fetch_runtime.py"
         )
-    required = ["models/pose_landmarker_lite.task", "vendor/vision_bundle.mjs",
-                "vendor/wasm/vision_wasm_internal.js", "vendor/wasm/vision_wasm_internal.wasm",
-                "vendor/wasm/vision_wasm_nosimd_internal.js", "vendor/wasm/vision_wasm_nosimd_internal.wasm",
-                "vendor/wasm/vision_wasm_module_internal.js", "vendor/wasm/vision_wasm_module_internal.wasm"]
-    if missing := [name for name in required if not (WEB / name).is_file() or (WEB / name).stat().st_size == 0]:
+    if missing := [name for name in REQUIRED_ASSETS if not (WEB / name).is_file() or (WEB / name).stat().st_size == 0]:
         sys.exit("Game assets are missing: " + ", ".join(missing) + "\nRun: python scripts/setup_assets.py")
 
     for name in LAUNCHER_FILES:
         if not (LAUNCHER / name).is_file():
             sys.exit(f"Launcher file missing: {LAUNCHER / name}")
+    for name in ("__init__.py", "app.py", "serve.py"):
+        if not (SERVER / name).is_file():
+            sys.exit(f"Account server file missing: {SERVER / name}")
     # A zip written into a packed folder would end up inside itself.
-    for source in (WEB, RUNTIME, LAUNCHER, ROOT / "docs"):
+    for source in (WEB, RUNTIME, LAUNCHER, SERVER, ROOT / "docs"):
         if output.resolve().is_relative_to(source.resolve()):
             sys.exit(f"Output must not be inside {source}: {output}")
 
@@ -79,6 +84,7 @@ def main(argv=None):
                 archive.write(LAUNCHER / name, f"{FOLDER}/{name}")
                 files += 1
             files += add_tree(archive, WEB, "web/")
+            files += add_tree(archive, SERVER, "server/")
             if (ROOT / "docs").is_dir():
                 files += add_tree(archive, ROOT / "docs", "docs/")
             for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):

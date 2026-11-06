@@ -7,6 +7,9 @@ console window stops the server.
 
     start_game.py                       opens /           (the personal game)
     start_game.py --path /stage.html    opens the big-screen page
+
+The same interpreter also answers /api/v1/, so the big-screen accounts and
+leaderboard work with no second process and no network.
 """
 import argparse
 from functools import partial
@@ -14,6 +17,7 @@ from hashlib import sha256
 from http.client import HTTPConnection, HTTPException
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import os
 from pathlib import Path
 import sys
@@ -24,6 +28,10 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
+# The embedded runtime ships a ._pth file, so the script's own folder is not on
+# sys.path the way a normal install would be. server/ lives next to this file.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 REQUIRED = [
     "vendor/vision_bundle.mjs",
     "vendor/wasm/vision_wasm_internal.js",
@@ -36,6 +44,8 @@ REQUIRED = [
 ]
 PORTS = [8787, 8788, 8789, 8790, 8791, 8792, 8793, 8794]
 INSTANCE_PATH = "/__movecraft_launcher_instance__"
+API_PREFIX = "/api/v1/"
+DB_PATH = ROOT / "data" / "movecraft.sqlite3"
 
 
 def instance_identity(web):
@@ -46,6 +56,7 @@ def instance_identity(web):
 
 
 class Handler(SimpleHTTPRequestHandler):
+    api = None  # the account/leaderboard App, set by main()
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
         ".wasm": "application/wasm",
@@ -62,7 +73,41 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
             return
+        if self.is_api():
+            return self.dispatch_api()
         super().do_GET()
+
+    def is_api(self):
+        return urlsplit(self.path).path.startswith(API_PREFIX)
+
+    def dispatch_api(self):
+        if self.api is None:
+            return self.api_unavailable()
+        from server.serve import respond
+        return respond(self.api, self)
+
+    def api_unavailable(self):
+        payload = json.dumps({"error": {"code": "server",
+                                        "message": "账号服务没有启动，请重新解压完整压缩包。"}}
+                             ).encode("utf-8")
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
+
+    def _write(self):
+        if self.is_api():
+            return self.dispatch_api()
+        self.send_error(405, "Method Not Allowed")
+
+    do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _write
+
+    def do_HEAD(self):
+        if self.is_api():
+            return self.dispatch_api()
+        super().do_HEAD()
 
     def end_headers(self):
         # The game is fully local; never let a proxy or cache serve stale assets.
@@ -142,6 +187,35 @@ def banner(url):
     print(line, flush=True)
 
 
+def database_path():
+    """The package folder when it is writable, otherwise the user's local data folder."""
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        return DB_PATH
+    except OSError:
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        folder = Path(base) if base else Path.home()
+        fallback = folder / "MoveCraft" / "movecraft.sqlite3"
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def start_api():
+    """Create the local account/leaderboard app.
+
+    Returns None when it cannot start: the static pages still work, and the
+    page reports a clear message instead of hanging.
+    """
+    try:
+        from server.app import create_app
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        return create_app(database_path())
+    except Exception:
+        print("账号服务没有启动，登录和排行榜暂时不可用；游戏本身照常可以玩。", flush=True)
+        traceback.print_exc()
+        return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="MoveCraft 一键启动")
     parser.add_argument("--path", default="/", help="要打开的页面，例如 /stage.html（默认 /）")
@@ -187,6 +261,8 @@ def main(argv=None):
         print("默认端口被其他程序占用，游戏改用：" + url, flush=True)
         print("注意：浏览器存档按地址和端口分别保存，换端口不会自动显示原存档。", flush=True)
         print("如需原存档，请先关闭占用程序再重开，或从原地址导出后导入。", flush=True)
+    app = start_api()
+    Handler.api = app
     banner(url)
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
@@ -195,6 +271,8 @@ def main(argv=None):
         print("\n已停止。")
     finally:
         server.server_close()
+        if app is not None:
+            app.close()
     return 0
 
 
