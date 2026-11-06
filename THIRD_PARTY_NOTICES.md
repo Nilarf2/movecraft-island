@@ -19,6 +19,13 @@
 - License: **Apache License 2.0**, stated under "LICENSED UNDER" in the model card. Full text in `web/vendor/LICENSE.txt`.
 - Used as distributed, without model modification. Models are downloaded at setup time and served locally during play.
 
+## Three.js
+
+- Author: three.js authors.
+- Package: `three` version **0.186.1** (same version as General Engine), files `build/three.module.js` and `build/three.core.js` copied unmodified into `web/vendor/three/`.
+- Source: https://github.com/mrdoob/three.js
+- License: **MIT**, full text in `web/vendor/three/LICENSE`.
+
 ## Voiceover
 
 - Clips in `web/audio/voice/` were generated with Google Gemini TTS (`gemini-3.8-flash-tts`, prebuilt voice **Puck**) through the Gemini API, under the Gemini API terms of service.
