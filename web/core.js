@@ -8,7 +8,7 @@ export const STAGES = [
   {name: '耕种', action: 'raise', move: '手臂平举', result: '获得食物', guide: '从双臂自然下垂开始，向两侧平举至肩高，再完整放下。', reward: '食物 +2', cost: 3},
   {name: '建房', action: 'squat', move: '深蹲', result: '庇护所升级', guide: '从站直开始，屈膝下蹲，再站起。侧前方机位更容易看到膝盖。', reward: '庇护所升 1 级 · 消耗 5 木材', cost: 5},
 ];
-export const CALORIES_PER_MOVE = [1, 1, 0.5, 1];
+export const CALORIES_PER_MOVE = [0.35, 0.35, 0.1, 0.25];
 const DAY = 86400000;
 export function today(now = new Date()) {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
@@ -56,15 +56,15 @@ export function required(s, date = today()) { return Math.min(25, 10 + Math.floo
 export function roundSummary(s) {
   const items = STAGES.map(({action, move}, i) => {
     const count = finite(s.counts?.[i], 0, 25);
-    return {action, move, count, calories: count * CALORIES_PER_MOVE[i]};
+    return {action, move, count, calories: Math.round(count * CALORIES_PER_MOVE[i] * 100) / 100};
   });
-  const totalCalories = items.reduce((total, item) => total + item.calories, 0);
+  const totalCalories = Math.round(items.reduce((total, item) => total + item.calories, 0) * 100) / 100;
   return {
     items, totalCalories,
-    percentile: Math.min(99, 95 + Math.floor(totalCalories / 10)),
+    percentile: Math.min(99, 98 + Math.floor(totalCalories / 20)),
     percentileNote: '鼓励值为游戏设定，非真实全国排名。',
     calorieNote: '按游戏约定估算，仅作运动反馈，不代表实际热量测量。',
-    encouragement: '每一次起跳、伸展和坚持，都在让你变得更有力量。今天的你很棒，休息一下，明天继续加油！',
+    encouragement: '太棒了！你完成了整轮运动，行动力和坚持都很强。休息一下，明天继续保持！',
   };
 }
 export function log(s, message) { s.history = [...s.history.slice(-29), message]; }
