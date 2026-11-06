@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>MoveCraft · 性能测试</title>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js"}}</script>
+<link rel="stylesheet" href="perf-lab.css">
+</head>
+<body>
+<canvas id="world" aria-hidden="true"></canvas>
+<canvas id="world2d" width="1120" height="620" aria-hidden="true" hidden></canvas>
+
+<header class="topbar">
+  <a class="brand" href="/index.html" aria-label="MoveCraft">
+    <span class="brand-mark">MC</span>
+    <span><small>体感荒岛</small><strong>性能测试</strong></span>
+  </a>
+  <div class="live-state" aria-live="polite"><i id="stateDot"></i><span id="stateLabel">准备就绪</span></div>
+</header>
+
+<main class="dashboard">
+  <section class="controls panel" aria-labelledby="configTitle">
+    <header class="panel-heading">
+      <div><p class="eyebrow">配置</p><h1 id="configTitle">测试设置</h1></div>
+      <span id="modeBadge" class="mode-badge">检测中</span>
+    </header>
+    <fieldset class="mode-choice">
+      <legend>采集模式</legend>
+      <label><input type="radio" name="testMode" value="render" checked><span>仅渲染</span></label>
+      <label><input type="radio" name="testMode" value="camera"><span>含摄像头</span></label>
+    </fieldset>
+    <label id="cameraField" class="field" hidden>
+      <span>摄像头</span>
+      <select id="cameraSelect" disabled><option value="">测试启动后选择</option></select>
+    </label>
+    <div class="actions">
+      <button id="startButton" class="primary" type="button">开始三档测试</button>
+      <button id="stopButton" class="secondary" type="button" disabled>停止</button>
+    </div>
+    <p id="detailStatus" class="detail-status" role="status">低 · 中 · 高 / 每档 20 秒</p>
+  </section>
+
+  <section class="results panel" aria-labelledby="resultsTitle">
+    <header class="panel-heading results-heading">
+      <div><p class="eyebrow">实时数据</p><h2 id="resultsTitle">运行表现</h2></div>
+      <span id="phaseLabel" class="phase-label">未开始</span>
+    </header>
+    <div class="metric-grid">
+      <article class="metric metric-fps"><span>当前档画面帧率</span><strong><b id="fpsValue">--</b><small>FPS</small></strong><em id="frameValue">帧时 p50 / p95 --</em></article>
+      <article class="metric metric-pose"><span>姿态识别</span><strong><b id="poseValue">--</b><small>FPS</small></strong><em>当前档 · 未启用时为 --</em></article>
+      <article class="metric metric-latency"><span>推理耗时</span><strong><b id="latencyValue">--</b><small>毫秒</small></strong><em>当前档平均</em></article>
+      <article class="metric metric-quality"><span>测试档位</span><strong><b id="qualityValue">--</b></strong><em id="renderMode">渲染路径 --</em></article>
+    </div>
+    <div class="tier-table" aria-label="画质档位结果">
+      <div class="tier-row tier-head"><span>画质</span><span>平均 FPS</span><span>识别 FPS</span><span>帧时 p50 / p95</span></div>
+      <div class="tier-row" data-tier="low"><strong>低</strong><span id="lowFps">--</span><span id="lowPose">--</span><span id="lowFrame">-- / --</span></div>
+      <div class="tier-row" data-tier="medium"><strong>中</strong><span id="mediumFps">--</span><span id="mediumPose">--</span><span id="mediumFrame">-- / --</span></div>
+      <div class="tier-row" data-tier="high"><strong>高</strong><span id="highFps">--</span><span id="highPose">--</span><span id="highFrame">-- / --</span></div>
+    </div>
+    <div class="progress-track" aria-label="测试进度"><span id="progressBar"></span></div>
+    <footer class="result-footer">
+      <span id="captureValue">采集尺寸 --</span>
+      <button id="copyButton" class="copy-button" type="button" disabled>复制报告</button>
+    </footer>
+    <div class="hardware"><span>浏览器</span><b id="browserValue">--</b><span>GPU / 渲染器</span><b id="gpuValue" title="">--</b></div>
+  </section>
+</main>
+
+<footer class="page-footer"><span>本机运行</span><span id="environmentValue">屏幕 · 初始化</span></footer>
+<script type="module" src="perf-lab.js"></script>
+</body>
+</html>

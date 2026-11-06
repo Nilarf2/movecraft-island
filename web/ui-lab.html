@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoveCraft 大屏界面实验室</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="stage/tokens.css">
+<link rel="stylesheet" href="stage/ui/ui.css">
+<style>
+  /* 只给实验室用：一块代替 3D 岛的亮色背景，看半透明面板压在上面的效果。 */
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: var(--mc-font); color: var(--mc-text);
+    background:
+      radial-gradient(ellipse 60% 26% at 50% 78%, color-mix(in srgb, var(--mc-warm) 70%, white) 0 60%, transparent 61%),
+      radial-gradient(ellipse 34% 30% at 50% 66%, color-mix(in srgb, var(--mc-accent-strong) 70%, var(--mc-ink)) 0 58%, transparent 60%),
+      linear-gradient(180deg, color-mix(in srgb, var(--mc-accent) 35%, white) 0%, color-mix(in srgb, var(--mc-accent) 55%, white) 52%,
+        color-mix(in srgb, var(--mc-accent-strong) 60%, var(--mc-ink)) 53%, color-mix(in srgb, var(--mc-accent-strong) 45%, var(--mc-ink)) 100%);
+  }
+  #stage { position: fixed; inset: 0; }
+  #boardWrap { position: fixed; inset: 0; display: grid; place-items: center; padding: 6vh 4vh; }
+  #boardWrap.is-side { place-items: center end; padding-right: 4vh; }
+  #labNav { position: fixed; left: 1vh; bottom: 1vh; z-index: 99; display: flex; flex-wrap: wrap; gap: 0.6vh; max-width: 60vw;
+    font: 14px/1.4 system-ui, sans-serif; }
+  #labNav a { padding: 2px 8px; color: var(--mc-ink); background: var(--mc-warm); border-radius: 4px; text-decoration: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script type="module">
+// 用假的 api 把三个组件挂出来。URL 参数切换状态，例如：
+//   ?view=login                       ?view=login&mode=register&fill=demo&error=taken&submit=1
+//   ?view=login&fill=demo&error=locked&submit=1   (error 取 credentials/locked/rate/network/taken/invalid)
+//   ?view=board&state=ok|empty|offline|loading|far&period=week|all&compact=1
+//   ?view=settle&reason=guest|offline|demo|queued&rank=3,80,46|none&counts=12,10,16,8
+//   ?view=menu&step=password|delete|confirm&fill=1&error=credentials&submit=1      加 &nav=1 显示切换链接
+import {mountLogin, mountAccountMenu} from './stage/ui/account.js';
+import {mountBoard} from './stage/ui/board.js';
+import {mountSettlement} from './stage/ui/settlement.js';
+import {roundSummary} from './core.js';
+
+const q = new URLSearchParams(location.search);
+const view = q.get('view') || 'login', state = q.get('state') || 'ok';
+const stage = document.getElementById('stage');
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const log = window.__labLog = [];
+const sfx = {play: (name, options) => log.push(['sfx', name, options?.pitch ?? null])};
+const delay = Number(q.get('delay') ?? 300);
+
+class ApiError extends Error {
+  constructor(code, message, extra = {}) { super(message); this.name = 'ApiError'; Object.assign(this, {code}, extra); }
+}
+const failWith = () => {
+  const code = q.get('error');
+  if (code) throw new ApiError(code, '实验室模拟的错误', code === 'locked' ? {retryAfter: 12 * 60} : {});
+};
+const recent = (q.get('recent') ?? '阿林,小舟_07,Coco,跳跳虎_3').split(',').filter(Boolean);
+const NAMES = ['椰子大王', '阿林', '跳跳虎_3', 'Coco', '小舟_07', '深蹲王', 'Mint', '林间风', '岛主候选', 'Leo_2009', '海浪', '晨跑侠'];
+const who = q.get('me') || (state === 'far' ? '小星星' : 'Coco');
+function boardOf(period) {
+  const totals = period === 'all' ? [318, 296, 296, 251, 240, 233, 199, 180, 176, 150, 121, 98] : [96, 88, 88, 80, 72, 65, 60, 54, 49, 41, 33, 25];
+  let rank = 0;
+  return totals.map((total, i) => {
+    if (i === 0 || total !== totals[i - 1]) rank = i + 1;  // 并列同名次：1, 2, 2, 4
+    return {rank, username: NAMES[(i + (period === 'all' ? 3 : 0)) % NAMES.length], total, rounds: Math.ceil(total / 40)};
+  });
+}
+const api = {
+  user: {id: 7, username: q.get('user') || '小星星'},
+  online: true,
+  async login(username, password, options = {}) { log.push(['login', username, !!options.remember]); await wait(delay); failWith(); return {token: 'lab', expiresAt: null, user: {id: 7, username}}; },
+  async register(username, password, options = {}) { log.push(['register', username, !!options.remember]); await wait(delay); failWith(); return {token: 'lab', expiresAt: null, user: {id: 8, username}}; },
+  recentUsers: () => [...recent],
+  forgetRecent: name => { const i = recent.indexOf(name); if (i >= 0) recent.splice(i, 1); log.push(['forget', name]); },
+  async leaderboard(period, limit) {
+    log.push(['leaderboard', period, limit]);
+    if (state === 'loading') return new Promise(() => {});
+    await wait(delay);
+    if (state === 'offline') throw new ApiError('network', '连不上服务器');
+    if (state === 'empty') return {period, weekStart: '2026-11-02', entries: [], me: null};
+    const list = boardOf(period), mine = list.find(e => e.username === who);
+    const me = q.get('compact') === '1' ? null : state === 'far' ? {rank: 23, total: 12, rounds: 1} : mine ? {rank: mine.rank, total: mine.total, rounds: mine.rounds} : null;
+    return {period, weekStart: '2026-11-02', entries: list.slice(0, limit), me};
+  },
+};
+if (q.get('noacct') !== '1') Object.assign(api, {
+  async changePassword(current, next) { log.push(['changePassword']); await wait(delay); failWith(); return {ok: true}; },
+  async deleteAccount(password) { log.push(['deleteAccount']); await wait(delay); failWith(); return {ok: true}; },
+});
+// ?api=real uses the real client against ./api/v1/ on this same origin (the address is never taken from the URL).
+if (q.get('api') === 'real') {
+  const {createApi} = await import('./net/api.js');
+  const real = createApi({storage: localStorage, sessionStorage, fetch: window.fetch.bind(window)});
+  for (const key of Object.keys(api)) delete api[key];
+  Object.defineProperties(api, Object.getOwnPropertyDescriptors(real));
+  window.__api = real;
+}
+const $ = selector => document.querySelector(selector);
+function type(field, value) {
+  const input = $(`[data-field="${field}"]`);
+  if (!input || input.closest('[hidden]')) return;
+  input.value = value;
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+}
+const click = action => $(`[data-action="${action}"]`)?.click();
+const ready = () => { document.body.dataset.ready = '1'; window.__labReady = true; };
+const FILL = {demo: ['小星星', 'island2026', 'island2026'], mismatch: ['小星星', 'island2026', 'island2025'], short: ['小', '123', '123'], bad: ['小 星', 'island2026', 'island2026']};
+
+async function login() {
+  mountLogin(stage, {
+    api: q.get('noapi') === '1' ? null : api, sfx,
+    onDone: result => log.push(['done', result]),
+    onCancel: () => log.push(['cancel']),
+  });
+  await wait(50);
+  if (q.get('mode') === 'register') click('register');
+  const fill = FILL[q.get('fill')] || (q.get('fill') || '').split(',').filter(Boolean);
+  if (fill.length) ['username', 'password', 'confirm'].forEach((field, i) => fill[i] !== undefined && type(field, fill[i]));
+  if (q.get('caps') === '1') {
+    $('[data-field="password"]').focus();
+    $('[data-field="password"]').dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, modifierCapsLock: true}));
+  }
+  if (q.get('submit') === '1') { click(q.get('mode') === 'register' ? 'register' : 'login'); await wait(delay + 150); }
+  ready();
+}
+async function board() {
+  const wrap = document.createElement('div');
+  wrap.id = 'boardWrap';
+  if (q.get('compact') === '1') wrap.className = 'is-side';
+  document.body.append(wrap);
+  const compact = q.get('compact') === '1';
+  window.__board = mountBoard(wrap, {api: q.get('noapi') === '1' ? null : api, sfx, period: q.get('period') || 'week',
+    highlight: compact ? null : who, limit: Number(q.get('limit') || 10), compact});
+  await wait(state === 'loading' ? 200 : delay + 150);
+  ready();
+}
+async function settle() {
+  const counts = (q.get('counts') || '12,10,16,8').split(',').map(Number);
+  const summary = roundSummary({counts});
+  const raw = q.get('rank') ?? '3,80,46';
+  const [weekRank, weekPercentile, weekTotal] = raw.split(',').map(v => v === 'null' || v === '' ? null : Number(v));
+  const rank = raw === 'none' ? null : {weekRank, weekPercentile, weekTotal};
+  mountSettlement(stage, {summary, rank, reason: q.get('reason') || null, sfx, onDone: () => log.push(['done'])});
+  const settled = () => $('[data-ui="settlement"]')?.dataset.state === 'done';
+  for (let i = 0; i < 100 && !settled(); i++) await wait(100);
+  await wait(1000);  // the flip transition
+  ready();
+}
+async function menu() {
+  mountAccountMenu(stage, {api: q.get('noapi') === '1' ? null : api, sfx, onDone: result => log.push(['done', result])});
+  await wait(50);
+  const step = q.get('step');
+  if (step === 'password' || step === 'delete' || step === 'confirm') click(step === 'password' ? 'password' : 'delete');
+  if (q.get('fill') === '1') { type('current', 'island2026'); type('password', step === 'password' ? 'newpass2026' : 'island2026'); type('confirm', 'newpass2026'); }
+  if (step === 'confirm') { type('password', 'island2026'); click('submit'); }
+  if (q.get('submit') === '1') { click(step === 'confirm' ? 'confirm' : 'submit'); await wait(delay + 150); }
+  ready();
+}
+({login, board, settle, menu}[view] || login)();
+
+if (q.get('nav') === '1') {
+  const nav = Object.assign(document.createElement('nav'), {id: 'labNav'});
+  for (const href of ['view=login', 'view=login&mode=register&fill=demo&error=taken&submit=1', 'view=login&fill=demo&error=locked&submit=1',
+    'view=login&fill=demo&error=network&submit=1', 'view=board', 'view=board&state=far', 'view=board&state=empty', 'view=board&state=offline',
+    'view=board&compact=1', 'view=settle', 'view=settle&reason=guest', 'view=settle&reason=queued', 'view=menu', 'view=menu&step=confirm']) {
+    nav.append(Object.assign(document.createElement('a'), {href: `?${href}&nav=1`, textContent: href.replace(/view=/, '').replace(/&/g, ' ')}));
+  }
+  document.body.append(nav);
+}
+</script>
+
+</body>
+</html>

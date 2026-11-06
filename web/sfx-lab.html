@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音效试听</title>
+<link rel="stylesheet" href="./stage/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  html { background: var(--mc-ink); }
+  body { margin: 0 auto; max-width: 1400px; padding: var(--mc-gap); color: var(--mc-text);
+    font: calc(var(--mc-s) * 0.6)/1.5 var(--mc-font); }
+  h1 { font-size: var(--mc-m); margin: 0 0 0.2em; }
+  #status { color: var(--mc-muted); margin: 0 0 var(--mc-gap); }
+  .panel { background: var(--mc-panel); border: 1px solid var(--mc-line); border-radius: var(--mc-radius);
+    padding: var(--mc-gap); margin-bottom: var(--mc-gap); box-shadow: var(--mc-shadow); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11em, 1fr)); gap: var(--mc-gap); }
+  button { font: inherit; color: var(--mc-text); background: var(--mc-panel-hi); border: 1px solid var(--mc-line);
+    border-radius: var(--mc-radius-s); padding: 0.6em 0.9em; cursor: pointer; text-align: left;
+    transition: transform 120ms var(--mc-ease), background-color 160ms var(--mc-ease); }
+  button:hover, button:focus-visible { border-color: var(--mc-accent); outline: none; }
+  button:active { transform: scale(0.97); }
+  button b { display: block; font-weight: 600; }
+  button small { color: var(--mc-muted); font-family: var(--mc-num); }
+  button.hit { background: var(--mc-accent-strong); color: var(--mc-ink); }
+  button.hit small { color: var(--mc-ink); }
+  button.miss { border-color: var(--mc-danger); }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mc-gap) calc(var(--mc-gap) * 2); }
+  .controls label { display: flex; align-items: center; gap: 0.5em; }
+  input[type=range] { width: 11em; accent-color: var(--mc-accent); }
+  input[type=checkbox] { width: 1.1em; height: 1.1em; accent-color: var(--mc-accent); }
+  output { font-family: var(--mc-num); min-width: 3.2em; color: var(--mc-warm); }
+  #stats { margin: 0; white-space: pre-wrap; color: var(--mc-muted); font: calc(var(--mc-s) * 0.5)/1.7 var(--mc-num); }
+</style>
+</head>
+<body>
+<h1>音效试听</h1>
+<p id="status">先点一下页面任意位置，解锁声音。</p>
+
+<section class="panel" aria-label="音效">
+  <div id="buttons" class="grid"></div>
+</section>
+
+<section class="panel controls" aria-label="控制">
+  <label>音高 <input id="pitch" type="range" min="0" max="1" step="0.01" value="0"><output id="pitchOut">0.00</output></label>
+  <label>音量 <input id="volume" type="range" min="0" max="1" step="0.01" value="1"><output id="volumeOut">100%</output></label>
+  <label><input id="mute" type="checkbox"> 静音</label>
+  <label><input id="duck" type="checkbox"> 旁白避让（duck）</label>
+  <label><input id="ambient" type="checkbox"> 海浪环境声</label>
+</section>
+
+<section class="panel controls" aria-label="组合">
+  <button id="stage10"><b>做一关（10 下）</b><small>rep ×9 → repFinal → stageDone</small></button>
+  <button id="narrate"><b>模拟旁白 3 秒</b><small>边计数边 duck，再恢复</small></button>
+  <button id="countdown3"><b>倒计时 3-2-1</b><small>countdown，最后一下高八度</small></button>
+  <button id="all"><b>全部播一遍</b><small>每个间隔 1.2 秒</small></button>
+</section>
+
+<section class="panel" aria-label="状态">
+  <pre id="stats">还没有声音引擎。</pre>
+</section>
+
+<script type="module">
+import {createSfx, SFX_NAMES} from './stage/sfx.js';
+
+const LABELS = {
+  rep: '计数', repFinal: '本关最后一下', stageDone: '一关完成', shelterUp: '房子升级', roundDone: '一轮完成',
+  coin: '资源进账', uiMove: '菜单移动', uiSelect: '确认', uiBack: '返回', error: '出错', login: '登录欢迎',
+  countdown: '倒计时', whoosh: '镜头切换',
+};
+const $ = id => document.getElementById(id);
+const sfx = createSfx();
+window.sfx = sfx;
+const timers = new Set();
+const later = (ms, fn) => { const id = setTimeout(() => { timers.delete(id); fn(); }, ms); timers.add(id); };
+
+if (!sfx.available) $('status').textContent = '这个浏览器没有 WebAudio，所有音效都是空操作。';
+const unlock = () => sfx.unlock().then(ok => {
+  if (ok) $('status').textContent = '声音已解锁。';
+});
+addEventListener('pointerdown', unlock, {capture: true});
+addEventListener('keydown', unlock, {capture: true});
+
+const pitch = () => Number($('pitch').value);
+function fire(name, options = {pitch: pitch()}) {
+  const ok = sfx.play(name, options);
+  const button = document.querySelector(`[data-name="${name}"]`);
+  if (button) {
+    button.classList.remove('hit', 'miss');
+    void button.offsetWidth;
+    button.classList.add(ok ? 'hit' : 'miss');
+    later(160, () => button.classList.remove('hit'));
+  }
+  return ok;
+}
+
+for (const name of SFX_NAMES) {
+  const button = document.createElement('button');
+  button.dataset.name = name;
+  button.innerHTML = `<b>${LABELS[name] || name}</b><small>${name}</small>`;
+  button.addEventListener('click', async () => { await unlock(); fire(name); });
+  $('buttons').append(button);
+}
+
+$('pitch').addEventListener('input', () => { $('pitchOut').textContent = pitch().toFixed(2); });
+$('volume').addEventListener('input', event => {
+  sfx.setVolume(Number(event.target.value));
+  $('volumeOut').textContent = Math.round(event.target.value * 100) + '%';
+});
+$('mute').addEventListener('change', event => sfx.mute(event.target.checked));
+$('duck').addEventListener('change', event => sfx.duck(event.target.checked));
+$('ambient').addEventListener('change', async event => { await unlock(); sfx.ambient(event.target.checked); });
+
+// 一关 10 下：pitch 用 count / target，和大屏页的用法一样。
+$('stage10').addEventListener('click', async () => {
+  await unlock();
+  for (let count = 1; count <= 10; count++) {
+    later((count - 1) * 450, () => fire(count === 10 ? 'repFinal' : 'rep', {pitch: count / 10}));
+  }
+  later(9 * 450 + 500, () => fire('stageDone'));
+});
+
+// 旁白开始前 1 秒和结束后都在计数，听 duck 压下去、再回来。
+$('narrate').addEventListener('click', async () => {
+  await unlock();
+  for (let i = 0; i < 12; i++) later(i * 500, () => fire('rep', {pitch: (i % 10) / 9}));
+  later(1000, () => { sfx.duck(true); $('duck').checked = true; });
+  later(4000, () => { sfx.duck(false); $('duck').checked = false; });
+});
+
+$('countdown3').addEventListener('click', async () => {
+  await unlock();
+  [0, 1, 2].forEach(i => later(i * 1000, () => fire('countdown', {pitch: i === 2 ? 1 : 0})));
+});
+
+$('all').addEventListener('click', async () => {
+  await unlock();
+  SFX_NAMES.forEach((name, i) => later(i * 1200, () => fire(name)));
+});
+
+setInterval(() => {
+  const s = sfx.stats();
+  $('stats').textContent = [
+    `状态 ${s.state}　声部 ${s.voices}　duck ${s.ducked ? '开' : '关'}　静音 ${s.muted ? '开' : '关'}　音量 ${Math.round(s.volume * 100)}%`,
+    `环境声 ${s.ambientPlaying ? '在响' : s.ambient ? '等解锁' : '关'}`,
+    `已播 ${s.played}　去重 ${s.deduped}　丢弃 ${s.dropped}　被挤掉 ${s.stolen}　被抢占 ${s.preempted}`,
+  ].join('\n');
+}, 250);
+</script>
+</body>
+</html>
