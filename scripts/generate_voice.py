@@ -74,10 +74,10 @@ VERTEX_EXPIRED = "令牌过期，请在 Cloud Shell 重新运行 gcloud auth pri
 VERTEX_DENIED = "Agent Platform 拒绝了请求，可能是赠金不覆盖该模型，或项目未启用 Agent Platform（Vertex AI）API"
 
 
-def load_lines():
-    """Every recordable line, exactly as the game builds it."""
+def load_lines(which="allVoiceLines"):
+    """Every recordable line, exactly as the game builds it (or the priority subset)."""
     module = (ROOT / "web/narration.js").as_uri()
-    code = f"const m = await import({json.dumps(module)}); console.log(JSON.stringify(m.allVoiceLines()));"
+    code = f"const m = await import({json.dumps(module)}); console.log(JSON.stringify(m.{which}()));"
     out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True)
     return json.loads(out.stdout)
 
@@ -569,9 +569,14 @@ def run(args, tts=None, route=None):
     lines = load_lines()
     for line in lines:
         line["id"] = clip_id(line, args.voice, args.model)
+    # --only priority records the big-screen subset first; assets and pruning still cover the whole script.
+    focus = None
+    if getattr(args, "only", "all") == "priority":
+        focus = {line["text"] for line in load_lines("priorityVoiceLines")}
+    wanted = lambda line: focus is None or line["text"] in focus
     CLIPS.mkdir(parents=True, exist_ok=True)
-    pending = [line for line in lines if not (CLIPS / f"{line['id']}.mp3").is_file()]
-    print(f"{len(lines)} lines, {len(lines) - len(pending)} already recorded, {len(pending)} to record", flush=True)
+    pending = [line for line in lines if wanted(line) and not (CLIPS / f"{line['id']}.mp3").is_file()]
+    print(f"{len(lines)} lines, {len(lines) - len(pending)} already recorded or skipped, {len(pending)} to record", flush=True)
     if args.dry_run:
         for i, batch in enumerate(plan(pending, args.batch, args.max_chars), 1):
             print(f"batch {i}: {len(batch)} lines, {sum(len(x['text']) for x in batch)} chars")
@@ -584,7 +589,7 @@ def run(args, tts=None, route=None):
         stop.set()
         fatal = error
         print(f"stopped: {redact(error, tts.secret, route.fallback and route.fallback.secret)}", flush=True)
-    pending = [line for line in lines if not (CLIPS / f"{line['id']}.mp3").is_file()]
+    pending = [line for line in lines if wanted(line) and not (CLIPS / f"{line['id']}.mp3").is_file()]
     for size in sorted({args.batch, max(args.batch // 3, 2), 1}, reverse=True):
         if not pending or stop.is_set():
             break
@@ -686,6 +691,8 @@ def main():
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true", help="show the plan without calling the API")
     parser.add_argument("--prune", action="store_true", help="delete clips no longer in the script")
+    parser.add_argument("--only", choices=["all", "priority"], default="all",
+                        help="priority: record only what the big-screen demo says with fresh accounts")
     args = parser.parse_args()
     if args.dry_run:
         return run(args)

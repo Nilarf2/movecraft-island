@@ -2,6 +2,7 @@
 // Each part's key is its exact text; recorded clips are looked up by that text.
 import {STAGES, SHELTERS, roundSummary} from './core.js';
 import {HINTS} from './detector.js';
+import {bigScreenSettlementSummary} from './stage/ui/logic.js';
 
 // One short delivery note per group, sent to the TTS model alongside each line.
 export const VOICE_STYLES = {
@@ -93,15 +94,68 @@ export function countParts({stage, count, target, shelter = 0, reinforced = fals
 const MOVES = STAGES.map(stage => stage.move);
 const MOVE_LIST = MOVES.slice(0, -1).join('、') + '和' + MOVES.at(-1);
 const rankText = percentile => `你击败了全国百分之${chineseNumber(percentile)}的人！`;
+const CALORIE_NOTE = '热量是游戏换算的估计，不是真实测量。';
 // Equal counts read as one recorded sentence; uneven legacy rounds point to the on-screen table.
-export function settlementParts({demo = false, summary}) {
+// The personal page keeps the old encouragement percentile; the big screen passes percentile: false
+// and the real weekly rank from the server instead.
+export function settlementParts({demo = false, summary, percentile = true, rank = null, gamePercentile = null}) {
   const parts = [line(demo ? '键鼠试玩结算，不计入真实运动。' : '这一轮全部完成，辛苦啦！', 'settlement')];
   const counts = summary.items.map(item => item.count);
-  if (counts[0] >= 1 && counts.every(count => count === counts[0])) {
-    parts.push(line(`${MOVE_LIST}各做了${chineseQuantity(counts[0])}个，一共消耗${chineseCalories(summary.totalCalories)}卡。${rankText(summary.percentile)}`, 'settlement'));
-  } else parts.push(line('每项的次数和热量都在屏幕上。', 'settlement'), line(rankText(summary.percentile), 'settlement'));
-  parts.push(line('热量和排名都是游戏换算的鼓励，不是真实测量。', 'note'), line('每一个动作都算数。好好休息，明天岛上见！', 'settlement'));
+  const equal = counts[0] >= 1 && counts.every(count => count === counts[0]);
+  const unit = percentile ? '卡' : '千卡';
+  const tally = equal ? `${MOVE_LIST}各做了${chineseQuantity(counts[0])}个，一共消耗${chineseCalories(summary.totalCalories)}${unit}。` : '每项的次数和热量都在屏幕上。';
+  if (percentile) {
+    if (equal) parts.push(line(tally + rankText(summary.percentile), 'settlement'));
+    else parts.push(line(tally, 'settlement'), line(rankText(summary.percentile), 'settlement'));
+    parts.push(line('热量和排名都是游戏换算的鼓励，不是真实测量。', 'note'));
+  } else {
+    const ranking = Number.isInteger(gamePercentile) ? [line(rankText(gamePercentile), 'settlement')]
+      : rank ? rankParts(rank) : [];
+    parts.push(line(tally, 'settlement'), ...ranking, line(CALORIE_NOTE, 'note'));
+  }
+  parts.push(line('每一个动作都算数。好好休息，明天岛上见！', 'settlement'));
   return parts;
+}
+
+// Big-screen lines. Usernames stay on screen only: a recording cannot say an arbitrary name.
+export const KIOSK = {
+  attract: '嗨，来岛上动一动吧！登录一下就能开始。',
+  loginPrompt: '输入用户名和密码就能登录。第一次来，点注册就行。',
+  welcomeNew: '注册成功！你的小岛已经准备好了。',
+  welcomeBack: '欢迎回来！你的小岛还在等你。',
+  guest: '游客模式，这一轮的成绩不进排行榜。',
+  wavePrompt: LOGIN_CONFIRM,
+  offline: '网络暂时连不上，成绩先存在这台电脑上，联网后自动上传。',
+  bye: '这一轮结束了，下一位同学请上岛！',
+};
+const KIOSK_GROUP = {attract: 'rules', loginPrompt: 'login', welcomeNew: 'cheer', welcomeBack: 'cheer',
+  guest: 'note', wavePrompt: 'login', offline: 'note', bye: 'settlement'};
+export function kioskParts(key) { return KIOSK[key] ? [line(KIOSK[key], KIOSK_GROUP[key])] : []; }
+
+export const RANK_LINES = {
+  solo: '这周你是第一个上榜的岛民！',
+  first: '本周排行第一，你就是岛主！',
+  top3: '冲进本周前三名了，太厉害了！',
+  top10: '进入本周前十名，继续保持！',
+  half: '这周你已经超过一半的岛民了！',
+  rest: '每一轮都在往上爬，下次冲得更高！',
+  guest: '游客成绩不进排行榜，注册账号就能上榜。',
+};
+// The exact rank stays on screen; the guide says which band it falls in.
+// percentile: share of this week's players you beat, 0–100; null when you are the only one.
+export function rankBand({rank = null, percentile = null} = {}) {
+  if (!Number.isInteger(rank) || rank < 1) return null;
+  if (rank === 1) return percentile === null || percentile === undefined ? 'solo' : 'first';
+  if (rank <= 3) return 'top3';
+  if (rank <= 10) return 'top10';
+  return Number.isFinite(percentile) && percentile >= 50 ? 'half' : 'rest';
+}
+export function rankParts({rank = null, percentile = null, reason = null} = {}) {
+  if (reason === 'demo') return [];
+  if (reason === 'guest') return [line(RANK_LINES.guest, 'settlement')];
+  if (reason === 'offline' || reason === 'queued') return [line(KIOSK.offline, 'note')];
+  const band = rankBand({rank, percentile});
+  return band ? [line(RANK_LINES[band], 'settlement')] : [];
 }
 // Detector hints stay as on-screen text; the guide says them in a more spoken way.
 const HINT_VOICE = {
@@ -159,20 +213,27 @@ export function loginStatusParts(text) { return [line(spokenLine(text), 'login')
 export function failedParts() { return [line(FAILED_LINE, 'failed')]; }
 
 // Every line the game can say with a recording: the TTS generator renders exactly this list.
-export function allVoiceLines() {
+export function allVoiceLines() { return collectLines({targets: [10, 25], settlements: [0, 25], legacy: true}); }
+// What the big-screen demo can say with fresh accounts (target 10): recorded first when quota is short.
+export function priorityVoiceLines() { return collectLines({targets: [10, 10], settlements: [10, 10], legacy: false}); }
+
+// legacy: lines only the personal page says (rules speech, invented percentile).
+function collectLines({targets, settlements, legacy}) {
   const lines = new Map();
   const add = part => {
     const existing = lines.get(part.text);
     if (existing && existing.group !== part.group) throw new Error(`同一句台词出现在两个分组：${part.text}`);
     if (!existing) lines.set(part.text, {text: part.text, style: VOICE_STYLES[part.group], group: part.group});
   };
-  rulesParts().forEach(add);
+  if (legacy) rulesParts().forEach(add);
   loginConfirmParts().forEach(add);
   for (const [id, text] of Object.entries(HINTS)) add(line(HINT_VOICE[id], LOGIN_HINTS.has(id) ? 'login' : 'correction'));
   for (const item of [...Object.values(CAMERA_ERRORS), ...Object.values(CAMERA_TIMEOUTS)]) add(line(item.voice, 'login'));
+  for (const key of Object.keys(KIOSK)) kioskParts(key).forEach(add);
   for (let stage = 0; stage < STAGES.length; stage++) {
-    for (let target = 10; target <= 25; target++) {
+    for (let target = targets[0]; target <= targets[1]; target++) {
       stageParts({stage, target, greeting: stage === 0}).forEach(add);
+      stageParts({stage, target}).forEach(add);
       for (let done = 1; done < target; done++) stageParts({stage, target, done}).forEach(add);
       for (let count = 1; count <= target; count++) {
         for (const slow of [false, true]) {
@@ -185,11 +246,21 @@ export function allVoiceLines() {
       }
     }
   }
+  const uneven = roundSummary({counts: [1, 2, 3, 4]});
   for (const demo of [false, true]) {
-    for (let count = 1; count <= 25; count++) settlementParts({demo, summary: roundSummary({counts: [count, count, count, count]})}).forEach(add);
-    settlementParts({demo, summary: roundSummary({counts: [0, 0, 0, 0]})}).forEach(add);
+    for (let count = settlements[0]; count <= settlements[1]; count++) {
+      const base = roundSummary({counts: [count, count, count, count]});
+      if (legacy) settlementParts({demo, summary: base}).forEach(add);
+      const summary = bigScreenSettlementSummary(base);
+      settlementParts({demo, summary, percentile: false, gamePercentile: summary.percentile}).forEach(add);
+    }
+    const kioskUneven = bigScreenSettlementSummary(uneven);
+    settlementParts({demo, summary: kioskUneven, percentile: false, gamePercentile: kioskUneven.percentile}).forEach(add);
   }
-  for (let percentile = 95; percentile <= 99; percentile++) add(line(rankText(percentile), 'settlement'));
+  if (legacy) for (let percentile = 95; percentile <= 99; percentile++) add(line(rankText(percentile), 'settlement'));
+  for (const reason of [null, 'guest', 'offline']) {
+    for (const rank of [1, 2, 5, 20]) for (const percentile of [null, 30, 80]) rankParts({rank, percentile, reason}).forEach(add);
+  }
   failedParts().forEach(add);
   return [...lines.values()];
 }

@@ -4,10 +4,12 @@ import {existsSync} from 'node:fs';
 import {STAGES, SHELTERS, fresh, record, required, roundSummary} from '../web/core.js';
 import {HINTS} from '../web/detector.js';
 import {VOICE_ASSETS} from '../web/voice.js';
+import {bigScreenSettlementSummary} from '../web/stage/ui/logic.js';
 import {
   allVoiceLines, VOICE_STYLES, RULES, LOGIN_CONFIRM, GREETING, FAILED_LINE, CAMERA_ERRORS, CAMERA_TIMEOUTS,
   chineseNumber, chineseQuantity, chineseCalories, rulesParts, stageParts, countParts, settlementParts,
   correctionParts, loginConfirmParts, loginStatusParts, failedParts, cameraError, spokenLine,
+  KIOSK, kioskParts, RANK_LINES, rankBand, rankParts, priorityVoiceLines,
 } from '../web/narration.js';
 
 const lines = allVoiceLines();
@@ -140,4 +142,68 @@ test('generated voice assets only cover lines in the current script', () => {
 test('every mapped voice clip exists in web/', () => {
   const missing = Object.values(VOICE_ASSETS).filter(path => !existsSync(new URL(`../web/${path}`, import.meta.url)));
   assert.deepEqual(missing, []);
+});
+
+test('big-screen settlement drops the invented percentile and can carry the real rank', () => {
+  for (const demo of [false, true]) {
+    for (let n = 0; n <= 25; n++) {
+      const summary = bigScreenSettlementSummary(roundSummary({counts: [n, n, n, n]}));
+      const parts = settlementParts({demo, summary, percentile: false, gamePercentile: summary.percentile});
+      assertRecorded(parts, `kiosk settlement ${n}`);
+      assert.ok(parts.some(part => part.text.includes('全国百分之九')), `encouragement rank missing at ${n}`);
+    }
+    const uneven = bigScreenSettlementSummary(roundSummary({counts: [3, 10, 7, 0]}));
+    assertRecorded(settlementParts({demo, summary: uneven, percentile: false, gamePercentile: uneven.percentile}), 'uneven kiosk settlement');
+  }
+  const ranked = settlementParts({summary: bigScreenSettlementSummary(roundSummary({counts: [10, 10, 10, 10]})), percentile: false, rank: {rank: 2, percentile: 90}});
+  assertRecorded(ranked, 'ranked settlement');
+  const text = ranked.map(part => part.text);
+  assert.ok(text.indexOf(RANK_LINES.top3) > text.findIndex(t => t.includes('各做了十个')), 'rank follows the tally');
+  assert.ok(text.indexOf(RANK_LINES.top3) < text.findIndex(t => t.includes('明天岛上见')), 'rank comes before goodbye');
+  assert.ok(text.join('').includes('一共消耗十点五千卡'));
+});
+
+test('rank bands and kiosk lines are recorded and never guess', () => {
+  assert.equal(rankBand({rank: 1, percentile: null}), 'solo');
+  assert.equal(rankBand({rank: 1, percentile: 80}), 'first');
+  assert.equal(rankBand({rank: 3, percentile: 60}), 'top3');
+  assert.equal(rankBand({rank: 10, percentile: 20}), 'top10');
+  assert.equal(rankBand({rank: 11, percentile: 50}), 'half');
+  assert.equal(rankBand({rank: 40, percentile: 12}), 'rest');
+  assert.equal(rankBand({rank: null}), null);
+  assert.deepEqual(rankParts({reason: 'demo', rank: 1, percentile: 90}), []);
+  assert.deepEqual(rankParts({rank: 0}), []);
+  for (const reason of [null, 'guest', 'offline', 'queued']) {
+    for (const rank of [1, 2, 4, 10, 11, 99]) for (const percentile of [null, 0, 49, 50, 100]) {
+      for (const part of rankParts({rank, percentile, reason})) assert.ok(known.has(part.text), `rank ${rank} ${percentile} ${reason}: ${part.text}`);
+      assert.equal(rankParts({rank, percentile, reason}).length, 1);
+    }
+  }
+  for (const key of Object.keys(KIOSK)) assertRecorded(kioskParts(key), `kiosk ${key}`);
+  assert.deepEqual(kioskParts('missing'), []);
+  assert.equal(KIOSK.wavePrompt, LOGIN_CONFIRM);
+});
+
+test('priority lines are a subset that covers a fresh account on the big screen', () => {
+  const priority = priorityVoiceLines();
+  assert.ok(priority.length < lines.length);
+  for (const line of priority) assert.ok(known.has(line.text), line.text);
+  const covered = new Set(priority.map(line => line.text));
+  const spoken = parts => { for (const part of parts) assert.ok(covered.has(part.text), `priority misses: ${part.text}`); };
+  for (const shelter of [0, 2, 5, 6]) {
+    const s = fresh(DATE);
+    Object.assign(s, {stamina: 1000, wood: 1000, shelter});
+    while (s.stage < 4) {
+      const stage = s.stage, previousShelter = s.shelter;
+      spoken(stageParts({stage, target: 10, done: s.counts[stage], greeting: stage === 0}));
+      record(s, STAGES[stage].action, DATE);
+      for (const slow of [false, true]) {
+        spoken(countParts({stage, count: s.counts[stage], target: 10, shelter: s.shelter, reinforced: stage === 3 && previousShelter === 6, slow}));
+      }
+    }
+    for (const demo of [false, true]) spoken(settlementParts({demo, summary: bigScreenSettlementSummary(roundSummary(s)), percentile: false, rank: {rank: 4, percentile: 70}}));
+  }
+  for (const key of Object.keys(KIOSK)) spoken(kioskParts(key));
+  for (const hint of Object.values(HINTS)) { spoken(correctionParts(hint)); spoken(loginStatusParts(hint)); }
+  spoken(failedParts());
 });
