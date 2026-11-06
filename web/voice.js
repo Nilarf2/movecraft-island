@@ -1,5 +1,7 @@
-// Map exact spoken fragments to local audio paths; incomplete lines use device TTS.
-export const VOICE_ASSETS = {};
+import {VOICE_ASSETS} from './voice-assets.js';
+
+// Recorded clips map exact spoken text to audio paths; incomplete lines use device TTS.
+export {VOICE_ASSETS};
 
 export class Narrator {
   constructor({assets = VOICE_ASSETS, environment = globalThis, startTimeout = 3000,

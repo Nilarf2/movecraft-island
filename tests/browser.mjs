@@ -17,6 +17,7 @@ try {
   const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
   await context.addInitScript(() => {
     Object.defineProperty(window, 'speechSynthesis', {configurable: true, value: null});
+    Object.defineProperty(window, 'Audio', {configurable: true, value: undefined});
     window.__cameraRequests = [];
     navigator.mediaDevices.enumerateDevices = async () => [];
     navigator.mediaDevices.getUserMedia = async constraints => {
@@ -112,6 +113,7 @@ try {
   await voiceContext.addInitScript(() => {
     window.__spoken = [];
     window.__cameraRequests = [];
+    Object.defineProperty(window, 'Audio', {configurable: true, value: undefined});
     class FakeUtterance { constructor(text) { this.text = text; } }
     Object.defineProperty(window, 'SpeechSynthesisUtterance', {configurable: true, value: FakeUtterance});
     Object.defineProperty(window, 'speechSynthesis', {configurable: true, value: {
@@ -134,7 +136,7 @@ try {
   await voicePage.waitForFunction(() => window.__spoken.length === 1);
   assert.equal(await voicePage.locator('#rulesPage').isVisible(), true);
   assert.equal(await voicePage.locator('#enterIsland').isDisabled(), true);
-  assert.match(await voicePage.evaluate(() => window.__spoken[0]), /竖直跳.*开合跳.*手臂平举.*深蹲.*每项从十次开始，每两天增加一次，最多二十五次/);
+  assert.match(await voicePage.evaluate(() => window.__spoken[0]), /竖直跳.*开合跳.*手臂平举.*深蹲.*每项从十个开始，每两天加一个，最多二十五个/);
   await voicePage.evaluate(() => window.__finishSpeech());
   await voicePage.locator('#loginPage').waitFor({state: 'visible'});
   await voicePage.waitForFunction(() => window.__cameraRequests.length === 1);
@@ -148,15 +150,15 @@ try {
   });
   await voicePage.locator('#demoLogin').click();
   const spokenSettlement = await voicePage.evaluate(() => window.__spoken.at(-1));
-  for (const line of ['完成十个竖直跳，消耗十卡。', '完成十个开合跳，消耗十卡。', '完成十个手臂平举，消耗五卡。', '完成十个深蹲，消耗十卡。', '共消耗三十五卡。', '非真实全国排名', '明天继续加油']) {
+  for (const line of ['竖直跳、开合跳、手臂平举和深蹲各做了十个，一共消耗三十五卡。', '你击败了全国百分之九十八的人！', '不是真实测量', '明天岛上见']) {
     assert.ok(spokenSettlement.includes(line), line);
   }
   await voicePage.locator('#settlementNext').click();
-  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*十个竖直跳.*双脚起跳/);
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /摘椰子.*十个竖直跳.*双脚一起跳/);
   await voicePage.evaluate(() => window.__finishSpeech());
   await voicePage.locator('#demoMove').click();
-  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /已完成竖直跳一个.*做得好/);
-  report.push('Settlement speaks every result and encouragement; stages and rep counts speak instructions and praise: passed');
+  assert.match(await voicePage.evaluate(() => window.__spoken.at(-1)), /^一！/);
+  report.push('Settlement celebrates results with an honest note; stages speak instructions and reps are counted: passed');
   await voiceContext.close();
   const workerResult = await page.evaluate(async () => {
     const worker = new Worker('/pose-worker.js', {type: 'module'});

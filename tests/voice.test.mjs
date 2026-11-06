@@ -11,8 +11,11 @@ function speechEnvironment() {
   return {environment: {speechSynthesis, SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } }}, calls};
 }
 
-test('recording slots are empty by default and unsupported speech completes safely', async () => {
-  assert.deepEqual(VOICE_ASSETS, {});
+test('recording manifest maps text to clip paths and unsupported speech completes safely', async () => {
+  assert.equal(typeof VOICE_ASSETS, 'object'); assert.ok(VOICE_ASSETS && !Array.isArray(VOICE_ASSETS));
+  for (const [text, source] of Object.entries(VOICE_ASSETS)) {
+    assert.ok(text.length > 0); assert.equal(typeof source, 'string'); assert.ok(source.length > 0, text);
+  }
   const voice = new Narrator({environment: {}});
   assert.deepEqual(await voice.speak('欢迎登岛'), {status: 'unavailable'});
 });

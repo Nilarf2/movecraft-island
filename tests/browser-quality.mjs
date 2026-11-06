@@ -4,6 +4,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {fresh} from '../web/core.js';
+import {LOGIN_CONFIRM} from '../web/narration.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = 18788;
@@ -25,6 +26,7 @@ function makeSave(date, overrides = {}) {
 function installBrowserMocks({camera = 'denied', seed = null, voiceEnabled = true} = {}) {
   if (location.protocol !== 'http:') return;
   window.__spoken = [];
+  Object.defineProperty(window, 'Audio', {configurable: true, value: undefined});
   window.__camera = {mode: camera, requests: 0, streams: [], workers: [], pending: null, stops: 0};
   class FakeUtterance { constructor(text) { this.text = text; } }
   Object.defineProperty(window, 'SpeechSynthesisUtterance', {configurable: true, value: FakeUtterance});
@@ -161,19 +163,31 @@ try {
     assert.deepEqual(await spoken(page), [], 'muted reload must not enqueue rules narration');
   });
 
-  await scenario('settlement narration keeps all details without duplicate punctuation', {seed: makeSave('2026-11-02', {stage: 4, counts: [10, 10, 10, 10], rounds: 1, moves: 40, shelter: 1, stamina: 26})}, async ({page}) => {
+  await scenario('settlement narration celebrates the round without duplicate punctuation', {seed: makeSave('2026-11-02', {stage: 4, counts: [10, 10, 10, 10], rounds: 1, moves: 40, shelter: 1, stamina: 26})}, async ({page}) => {
     await finishSpeech(page);
     await page.locator('#loginPage').waitFor({state: 'visible'});
     await page.locator('#demoLogin').click();
     await page.locator('#settlementPage').waitFor({state: 'visible'});
     const line = (await spoken(page)).at(-1);
-    for (const phrase of ['键鼠试玩结算，非实际运动记录。', '完成十个竖直跳，消耗十卡。', '完成十个开合跳，消耗十卡。', '完成十个手臂平举，消耗五卡。', '完成十个深蹲，消耗十卡。', '共消耗三十五卡。', '已击败全国百分之九十八的人！', '鼓励值为游戏设定，非真实全国排名。', '不代表实际热量测量。', '明天继续加油']) {
+    for (const phrase of ['键鼠试玩结算，不计入真实运动。', '竖直跳、开合跳、手臂平举和深蹲各做了十个，一共消耗三十五卡。', '你击败了全国百分之九十八的人！', '热量和排名都是游戏换算的鼓励，不是真实测量。', '明天岛上见']) {
       assert.ok(line.includes(phrase), `settlement narration should include: ${phrase}`);
     }
     assert.doesNotMatch(line, /[。！？.!?]{2}/, 'sentence boundaries must not repeat punctuation');
   });
 
-  await scenario('fractional calories compose the separately recorded decimal clips', {
+  await scenario('equal counts read half calories in one recorded sentence', {
+    date: '2026-11-04T12:00:00+08:00',
+    seed: makeSave('2026-11-04', {started: '2026-11-02', stage: 4, counts: [11, 11, 11, 11], rounds: 1, moves: 44, shelter: 1, stamina: 30}),
+  }, async ({page}) => {
+    await finishSpeech(page);
+    await page.locator('#loginPage').waitFor({state: 'visible'});
+    await page.locator('#demoLogin').click();
+    const line = (await spoken(page)).at(-1);
+    assert.ok(line.includes('各做了十一个，一共消耗三十八点五卡。'));
+    assert.ok(line.includes('百分之九十八'));
+  });
+
+  await scenario('uneven legacy counts point to the on-screen table and keep the rank', {
     date: '2026-11-04T12:00:00+08:00',
     seed: makeSave('2026-11-04', {started: '2026-11-02', stage: 4, counts: [10, 10, 11, 10], rounds: 1, moves: 41, shelter: 1, stamina: 27}),
   }, async ({page}) => {
@@ -181,35 +195,38 @@ try {
     await page.locator('#loginPage').waitFor({state: 'visible'});
     await page.locator('#demoLogin').click();
     const line = (await spoken(page)).at(-1);
-    assert.ok(line.includes('完成十一个手臂平举，消耗五点五卡。'));
-    assert.ok(line.includes('共消耗三十五点五卡。'));
+    assert.ok(line.includes('每项的次数和热量都在屏幕上。'));
+    assert.ok(line.includes('你击败了全国百分之九十八的人！'));
+    assert.ok((await page.locator('#settlementRows p').allTextContents()).includes('完成 11 个手臂平举，消耗 5.5 卡'));
+    assert.equal(await page.locator('#settlementTotal').textContent(), '共消耗 35.5 卡');
   });
 
-  await scenario('integer two calories uses the classifier form 两卡', {
-    seed: makeSave('2026-11-02', {stage: 4, counts: [0, 0, 4, 0], rounds: 1, moves: 4, shelter: 1, stamina: 4}),
+  await scenario('two reps each use the classifier form 两个', {
+    seed: makeSave('2026-11-02', {stage: 4, counts: [2, 2, 2, 2], rounds: 1, moves: 8, shelter: 1, stamina: 8}),
   }, async ({page}) => {
     await finishSpeech(page);
     await page.locator('#loginPage').waitFor({state: 'visible'});
     await page.locator('#demoLogin').click();
     const line = (await spoken(page)).at(-1);
-    assert.ok(line.includes('完成四个手臂平举，消耗两卡。'));
-    assert.ok(line.includes('共消耗两卡。'));
+    assert.ok(line.includes('各做了两个，一共消耗七卡。'));
+    assert.ok(line.includes('百分之九十五'));
   });
 
   const quickCountSave = makeSave('2026-11-02', {stamina: 12});
   await scenario('rapid rep narration coalesces to the latest count and transition waits for it', {seed: quickCountSave}, async ({page}) => {
     await enterDemo(page);
     for (let i = 0; i < 4; i++) await page.locator('#demoMove').click();
+    const isCount = line => /^[一二三四五六七八九十]+！/.test(line);
     let lines = await spoken(page);
-    assert.equal(lines.filter(line => /已完成竖直跳/.test(line)).length, 0, 'counts must wait for the activity instructions');
+    assert.equal(lines.filter(isCount).length, 0, 'counts must wait for the activity instructions');
     await finishSpeech(page);
     lines = await spoken(page);
-    assert.ok(lines.some(line => /已完成竖直跳四个/.test(line)), 'queued count should collapse to latest');
+    assert.ok(lines.some(line => line === '四！'), 'queued count should collapse to latest');
     for (let i = 0; i < 6; i++) await page.locator('#demoMove').click();
     await finishSpeech(page);
     lines = await spoken(page);
-    assert.ok(lines.some(line => /已完成竖直跳十个/.test(line)));
-    assert.equal(lines.filter(line => /已完成竖直跳/.test(line)).length, 2, 'only active and latest count should be spoken');
+    assert.ok(lines.some(line => line.startsWith('十！椰子摘够了')), 'final count announces the reward');
+    assert.equal(lines.filter(isCount).length, 2, 'only active and latest count should be spoken');
     await delay(3800);
     assert.equal(await page.locator('#toast').isVisible(), true, 'stage change must wait while latest count is still speaking');
     assert.equal((await spoken(page)).filter(line => /砍树.*十个开合跳/.test(line)).length, 0);
@@ -352,7 +369,7 @@ try {
     await page.evaluate(() => window.speechSynthesis.finish());
     await page.locator('#loginPage').waitFor({state: 'visible'});
     await page.waitForFunction(() => document.querySelector('#cameraBadge').classList.contains('live'));
-    assert.ok((await spoken(page)).slice(speechCount).some(line => line.includes('平举右手向左挥动完成确认')));
+    assert.ok((await spoken(page)).slice(speechCount).some(line => line.includes(LOGIN_CONFIRM)));
     await page.locator('#loginStatus').waitFor({state: 'visible'});
     await page.waitForFunction(() => document.querySelector('#loginStatus').textContent.includes('识别暂时没有响应'), undefined, {timeout: 7000});
     assert.equal(await page.locator('#cameraBadge').textContent(), '已暂停');
@@ -382,8 +399,8 @@ try {
     await page.waitForFunction(() => document.querySelector('#cameraBadge').classList.contains('live'));
     assert.equal((await spoken(page)).length, before, 'login announcement must not interrupt an open help dialog');
     await page.locator('#helpDialog button[aria-label="关闭规则"]').click();
-    await page.waitForFunction(() => window.__spoken.at(-1)?.text.includes('平举右手向左挥动完成确认'));
-    assert.match((await spoken(page)).at(-1), /平举右手向左挥动完成确认/);
+    await page.waitForFunction(text => window.__spoken.at(-1)?.text.includes(text), LOGIN_CONFIRM);
+    assert.equal((await spoken(page)).at(-1), LOGIN_CONFIRM);
   });
 
 } finally {

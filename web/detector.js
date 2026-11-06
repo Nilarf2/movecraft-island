@@ -1,4 +1,22 @@
 // MediaPipe 33-point pose geometry. No inference or browser APIs in this module.
+// On-screen hints; narration.js maps each one to a spoken line.
+export const HINTS = {
+  ready: '请站稳，让需要的身体部位完整入镜。',
+  waveSweep: '很好，右手保持肩高，向你的左侧挥动。',
+  waveReady: '先将右臂向右侧平举，稍停，再向左挥动。',
+  raiseUp: '双臂放回身侧，完成这一次。',
+  raiseReady: '双臂向两侧平举至肩高，稍停，再放下。',
+  jackOpen: '放下双手，双脚收回。',
+  jackFeetOnly: '双脚打开得很好，再把双手举高一些。',
+  jackReady: '双脚打开，同时把双手举过头顶。',
+  squatLow: '慢慢站直，完成这一次。',
+  squatReady: '先站直，髋部向后下方坐，再站起。',
+  jumpCalibrate: '先站直并保持半秒，正在标定地面。',
+  jumpAir: '双脚平稳落地。',
+  jumpReady: '双脚竖直起跳，再回到原地。',
+  missingArms: '请让肩、髋和双臂入镜，保持光线充足。',
+  missingBody: '请退后一点，让肩、髋、膝和双脚完整入镜。',
+};
 const SIDES = [[11, 13, 15, 23, 25, 27], [12, 14, 16, 24, 26, 28]];
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const mean = (...v) => v.reduce((a, b) => a + b, 0) / v.length;
@@ -14,7 +32,7 @@ export class Detector {
     this.lastRep = -Infinity; this.candidate = ''; this.candidateSince = 0;
     this.invalidSince = null;
     this.samples = []; this.ground = null; this.waveStart = null; this.squatHip = null;
-    this.hint = '请站稳，让需要的身体部位完整入镜。';
+    this.hint = HINTS.ready;
   }
   stable(condition, name, now, duration = 90) {
     if (!condition) { if (this.candidate === name) this.candidate = ''; return false; }
@@ -45,7 +63,7 @@ export class Detector {
           const start = level && Math.abs(l[14].y - l[12].y) < torso * 0.6 && l[16].x < l[12].x - torso * 0.2;
           if (this.stable(start, 'arm', now, 100)) { this.waveStart = l[16].x - l[12].x; this.change('sweep', now); }
         } else if (level && l[16].x - l[12].x - this.waveStart > torso * 0.45) emit();
-        this.hint = this.phase === 'sweep' ? '很好，右手保持肩高，向你的左侧挥动。' : '先将右臂向右侧平举，稍停，再向左挥动。';
+        this.hint = this.phase === 'sweep' ? HINTS.waveSweep : HINTS.waveReady;
       }
     } else if (valid && this.action === 'raise') {
       valid = visible([11, 12, 13, 14, 15, 16, 23, 24]);
@@ -56,7 +74,7 @@ export class Detector {
         if (this.phase === 'ready' && this.stable(down, 'down', now)) this.change('down', now);
         else if (this.phase === 'down' && this.stable(up, 'up', now, 100)) this.change('up', now);
         else if (this.phase === 'up' && this.stable(down, 'finish', now)) emit();
-        this.hint = this.phase === 'up' ? '双臂放回身侧，完成这一次。' : '双臂向两侧平举至肩高，稍停，再放下。';
+        this.hint = this.phase === 'up' ? HINTS.raiseUp : HINTS.raiseReady;
       }
     } else if (valid && this.action === 'jack') {
       valid = visible([11, 12, 15, 16, 23, 24, 27, 28]);
@@ -68,7 +86,7 @@ export class Detector {
         if (this.phase === 'ready' && this.stable(closed, 'closed', now)) this.change('closed', now);
         else if (this.phase === 'closed' && this.stable(open, 'open', now, 60)) this.change('open', now);
         else if (this.phase === 'open' && this.stable(closed, 'finish', now, 60)) emit();
-        this.hint = this.phase === 'open' ? '放下双手，双脚收回。' : feet > width * 1.3 ? '双脚打开得很好，再把双手举高一些。' : '双脚打开，同时把双手举过头顶。';
+        this.hint = this.phase === 'open' ? HINTS.jackOpen : feet > width * 1.3 ? HINTS.jackFeetOnly : HINTS.jackReady;
       }
     } else if (valid && this.action === 'squat') {
       // Keep one reference side throughout a cycle, even if confidence alternates.
@@ -80,7 +98,7 @@ export class Detector {
         if (this.phase === 'ready' && this.stable(knee > 148, 'standing', now, 100)) { this.squatHip = l[h].y; this.squatSide = h; this.change('standing', now); }
         else if (this.phase === 'standing' && h === this.squatSide && this.stable(knee < 138 && l[h].y - this.squatHip > torso * 0.08, 'low', now)) this.change('low', now);
         else if (this.phase === 'low' && h === this.squatSide && this.stable(knee > 148, 'finish', now, 90)) emit();
-        this.hint = this.phase === 'low' ? '慢慢站直，完成这一次。' : '先站直，髋部向后下方坐，再站起。';
+        this.hint = this.phase === 'low' ? HINTS.squatLow : HINTS.squatReady;
       }
     } else if (valid && this.action === 'jump') {
       valid = visible([11, 12, 23, 24, 25, 26, 27, 28]);
@@ -93,7 +111,7 @@ export class Detector {
             const avg = key => mean(...this.samples.map(x => x[key]));
             this.ground = {left: avg('left'), right: avg('right'), hip: avg('hip'), torso: avg('torso')};
           }
-          this.hint = '先站直并保持半秒，正在标定地面。';
+          this.hint = HINTS.jumpCalibrate;
         } else {
           const g = this.ground;
           const airborne = g.left - l[27].y > torso * 0.08 && g.right - l[28].y > torso * 0.08 && g.hip - hip > torso * 0.08 && torso / g.torso > 0.75 && torso / g.torso < 1.25;
@@ -102,7 +120,7 @@ export class Detector {
           else if (this.phase === 'air' && now - this.since >= 70 && landed && !airborne) emit();
           // Follow slow camera/body drift only while confidently on the ground.
           if (this.phase === 'ready' && landed && !airborne) for (const [key, value] of Object.entries({left: l[27].y, right: l[28].y, hip})) g[key] += (value - g[key]) * 0.03;
-          this.hint = this.phase === 'air' ? '双脚平稳落地。' : '双脚竖直起跳，再回到原地。';
+          this.hint = this.phase === 'air' ? HINTS.jumpAir : HINTS.jumpReady;
         }
       }
     }
@@ -111,7 +129,7 @@ export class Detector {
       this.invalidSince ??= now;
       this.candidate = '';
       if (now - this.invalidSince >= 250) { this.reset(); this.last = now; }
-      this.hint = this.action === 'wave' || this.action === 'raise' ? '请让肩、髋和双臂入镜，保持光线充足。' : '请退后一点，让肩、髋、膝和双脚完整入镜。';
+      this.hint = this.action === 'wave' || this.action === 'raise' ? HINTS.missingArms : HINTS.missingBody;
     } else this.invalidSince = null;
     return {count, valid, phase: this.phase, hint: this.hint};
   }
