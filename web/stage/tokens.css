@@ -1,0 +1,28 @@
+/* 大屏版公共设计变量：主代理维护，各模块只读。按 1920×1080、3 米外观看设计。 */
+:root {
+  --mc-ink: #052427;
+  --mc-panel: rgba(5, 38, 42, 0.78);
+  --mc-panel-solid: #0a363b;
+  --mc-panel-hi: rgba(14, 66, 70, 0.88);
+  --mc-line: rgba(123, 224, 195, 0.32);
+  --mc-accent: #7be0c3;
+  --mc-accent-strong: #36c99a;
+  --mc-warm: #ffd36e;
+  --mc-text: #f3fffb;
+  --mc-muted: #a9cec6;
+  --mc-danger: #ff8f7e;
+
+  --mc-font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --mc-num: "Bahnschrift", "DIN Alternate", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --mc-s: 3vh;     /* 最小字号，约 32 px */
+  --mc-m: 4.2vh;
+  --mc-l: 6.4vh;
+  --mc-xl: 20vh;   /* 大号计数 */
+
+  --mc-radius: 2.4vh;
+  --mc-radius-s: 1.2vh;
+  --mc-gap: 2vh;
+  --mc-shadow: 0 1.2vh 4vh rgba(0, 20, 22, 0.45);
+  --mc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --mc-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}

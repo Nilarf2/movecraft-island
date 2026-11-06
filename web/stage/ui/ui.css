@@ -1,0 +1,319 @@
+/* 大屏账号、排行榜、结算界面。颜色、字号、圆角只用 tokens.css 的变量；最小字号 var(--mc-s)。
+   按 1920×1080、3 米外观看设计。焦点框用暖黄色粗框，任何时候都显示。 */
+.mcui, .mcui *, .mcui *::before, .mcui *::after { box-sizing: border-box; }
+.mcui {
+  font-family: var(--mc-font);
+  font-size: var(--mc-s);
+  line-height: 1.35;
+  color: var(--mc-text);
+  -webkit-font-smoothing: antialiased;
+}
+.mcui [hidden] { display: none !important; }
+.mcui-sr {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* 覆盖全屏的一层，卡片居中。背后的 3D 岛透过半透明面板露出来。 */
+.mcui-layer {
+  position: fixed; inset: 0; z-index: 30;
+  display: grid; place-items: center;
+  padding: var(--mc-gap);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--mc-ink) 42%, transparent), color-mix(in srgb, var(--mc-ink) 12%, transparent) 70%);
+}
+.mcui-card {
+  position: relative;
+  max-width: 96vw; max-height: 96vh; overflow: auto;
+  padding: calc(var(--mc-gap) * 2);
+  background: var(--mc-panel);
+  border: 0.25vh solid var(--mc-line);
+  border-radius: var(--mc-radius);
+  box-shadow: var(--mc-shadow);
+}
+.mcui-title { margin: 0; font-size: var(--mc-l); font-weight: 800; line-height: 1.15; letter-spacing: 0.02em; }
+.mcui-sub { margin: 0; font-size: var(--mc-s); color: var(--mc-muted); }
+.mcui-note {
+  margin: 0; padding: 1vh 1.8vh;
+  font-size: var(--mc-s); font-weight: 700; color: var(--mc-warm);
+  border: 0.25vh solid color-mix(in srgb, var(--mc-warm) 60%, transparent);
+  border-radius: var(--mc-radius-s);
+  background: color-mix(in srgb, var(--mc-warm) 12%, transparent);
+}
+.mcui-warn {
+  margin: 0; padding: 1.4vh 2vh;
+  font-size: var(--mc-s); color: var(--mc-text);
+  border: 0.25vh solid var(--mc-danger);
+  border-radius: var(--mc-radius-s);
+  background: color-mix(in srgb, var(--mc-danger) 16%, transparent);
+}
+/* 按钮：主按钮薄荷绿底、深色字；次按钮描边；危险按钮红底。都是真正的 button 元素。 */
+.mcui-btn {
+  appearance: none; margin: 0; cursor: pointer;
+  min-height: 9.6vh; padding: 0 3.6vh;
+  font: inherit; font-size: var(--mc-m); font-weight: 800; line-height: 1;
+  color: var(--mc-text);
+  background: transparent;
+  border: 0.4vh solid var(--mc-accent);
+  border-radius: var(--mc-radius);
+  transition: transform 160ms var(--mc-ease), background-color 160ms var(--mc-ease), box-shadow 160ms var(--mc-ease);
+}
+.mcui-btn:hover { background: var(--mc-panel-hi); }
+.mcui-btn.is-primary { color: var(--mc-ink); background: var(--mc-accent); border-color: var(--mc-accent); }
+.mcui-btn.is-primary:hover { background: var(--mc-accent-strong); border-color: var(--mc-accent-strong); }
+.mcui-btn.is-danger { color: var(--mc-ink); background: var(--mc-danger); border-color: var(--mc-danger); }
+.mcui-btn.is-quiet { border-color: var(--mc-line); color: var(--mc-muted); }
+.mcui-btn.is-small { min-height: 7vh; padding: 0 2.4vh; font-size: var(--mc-s); }
+.mcui-btn[aria-disabled="true"] { opacity: 0.55; cursor: progress; }
+
+/* 焦点框：3 米外也要看出当前在哪。键盘和鼠标都显示。 */
+.mcui :is(button, input, [tabindex]):focus { outline: none; }
+.mcui :is(button, input, [tabindex]):focus-visible,
+.mcui :is(button, input):focus {
+  outline: 0.7vh solid var(--mc-warm);
+  outline-offset: 0.5vh;
+  box-shadow: 0 0 0 1.4vh color-mix(in srgb, var(--mc-warm) 22%, transparent);
+}
+.mcui .mcui-btn:focus { transform: scale(1.04); }
+.mcui [tabindex="-1"]:focus { outline: none; box-shadow: none; }
+
+/* 输入框：标签在左，输入框在右，一行一个。 */
+.mcui-fields { display: grid; grid-template-columns: max-content 1fr; align-items: center; gap: 1.8vh 2.4vh; }
+.mcui-label { font-size: var(--mc-m); font-weight: 700; color: var(--mc-text); white-space: nowrap; }
+.mcui-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
+.mcui-input {
+  width: 100%; min-width: 0; height: 9.6vh; margin: 0;
+  padding: 0 2.4vh;
+  font: inherit; font-size: var(--mc-m); font-weight: 700; color: var(--mc-text);
+  background: color-mix(in srgb, var(--mc-ink) 70%, transparent);
+  border: 0.4vh solid var(--mc-line);
+  border-radius: var(--mc-radius-s);
+  caret-color: var(--mc-warm);
+}
+.mcui-input::placeholder { color: var(--mc-muted); opacity: 1; font-size: var(--mc-s); font-weight: 400; }
+.mcui-input[aria-invalid="true"] { border-color: var(--mc-danger); }
+.mcui-input:focus { border-color: var(--mc-warm); }
+.mcui-wrap.has-eye .mcui-input { padding-right: 14vh; }
+.mcui-wrap.has-eye.has-caps .mcui-input { padding-right: 32vh; }
+.mcui-eye {
+  position: absolute; right: 1.2vh; top: 50%; transform: translateY(-50%);
+  min-height: 6.8vh; padding: 0 2vh;
+  font: inherit; font-size: var(--mc-s); font-weight: 700; cursor: pointer;
+  color: var(--mc-accent); background: transparent;
+  border: 0.3vh solid var(--mc-line); border-radius: var(--mc-radius-s);
+}
+.mcui .mcui-eye:focus { transform: translateY(-50%); }
+.mcui-caps {
+  position: absolute; right: 14vh; top: 50%; transform: translateY(-50%);
+  padding: 0.6vh 1.4vh;
+  font-size: var(--mc-s); font-weight: 800; color: var(--mc-ink);
+  background: var(--mc-warm); border-radius: var(--mc-radius-s);
+  pointer-events: none; white-space: nowrap;
+}
+/* 「记住我」：真正的 checkbox，画成开关。 */
+.mcui-switch { display: inline-flex; align-items: center; gap: 1.6vh; cursor: pointer; }
+.mcui-switch input {
+  appearance: none; flex: none; margin: 0; cursor: pointer;
+  width: 10vh; height: 5.6vh; border-radius: 2.8vh;
+  background: color-mix(in srgb, var(--mc-ink) 70%, transparent);
+  border: 0.4vh solid var(--mc-line);
+  position: relative; transition: background-color 160ms var(--mc-ease);
+}
+.mcui-switch input::after {
+  content: ""; position: absolute; top: 0.5vh; left: 0.6vh;
+  width: 3.8vh; height: 3.8vh; border-radius: 50%;
+  background: var(--mc-muted); transition: transform 160ms var(--mc-ease), background-color 160ms var(--mc-ease);
+}
+.mcui-switch input:checked { background: var(--mc-accent-strong); border-color: var(--mc-accent); }
+.mcui-switch input:checked::after { transform: translateX(4.4vh); background: var(--mc-text); }
+.mcui-switch-text { font-size: var(--mc-m); font-weight: 700; }
+.mcui-switch-hint { font-size: var(--mc-s); color: var(--mc-muted); }
+
+/* 报错和提示：固定占两行，出现时版面不跳。 */
+.mcui-msg { min-height: 6vh; margin: 0; font-size: var(--mc-m); font-weight: 800; display: flex; align-items: center; line-height: 1.2; }
+.mcui ::selection { color: var(--mc-ink); background: var(--mc-warm); }
+.mcui-msg:empty { visibility: hidden; }
+.mcui-msg[data-tone="error"] { color: var(--mc-danger); }
+.mcui-msg[data-tone="info"] { color: var(--mc-accent); }
+.mcui-msg[data-tone="warn"] { color: var(--mc-warm); }
+.mcui-pulse { animation: mcui-pulse 420ms var(--mc-ease); }
+@keyframes mcui-pulse { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1.2vh); } 75% { transform: translateX(1.2vh); } }
+
+.mcui-actions { display: flex; flex-wrap: wrap; gap: var(--mc-gap); }
+.mcui-actions .mcui-btn { flex: 1 1 0; white-space: nowrap; }
+
+/* 登录卡片：左边表单，右边最近登录和隐私说明。 */
+.mcui-login { width: min(156vh, 96vw); display: grid; grid-template-columns: minmax(0, 1fr) 48vh; gap: calc(var(--mc-gap) * 2.5); }
+.mcui-main { display: grid; gap: var(--mc-gap); align-content: start; min-width: 0; }
+.mcui-head { display: grid; gap: 1vh; }
+.mcui-side {
+  display: grid; gap: calc(var(--mc-gap) * 1.4); align-content: start;
+  padding-left: calc(var(--mc-gap) * 2.5);
+  border-left: 0.25vh solid var(--mc-line);
+}
+.mcui-side-title { margin: 0; font-size: var(--mc-m); font-weight: 800; }
+.mcui-chips { display: flex; flex-wrap: wrap; gap: 1.4vh; margin: 0; padding: 0; list-style: none; }
+.mcui-chip {
+  display: inline-flex; align-items: stretch;
+  border: 0.3vh solid var(--mc-line); border-radius: var(--mc-radius-s);
+  background: var(--mc-panel-hi);
+}
+.mcui-chip button {
+  appearance: none; margin: 0; cursor: pointer; font: inherit; color: var(--mc-text); background: transparent; border: 0;
+  min-height: 7vh; font-size: var(--mc-s); font-weight: 700;
+}
+.mcui-chip-pick { padding: 0 1.4vh 0 2vh; max-width: 32vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcui-chip-x { padding: 0 1.6vh; color: var(--mc-muted); border-left: 0.3vh solid var(--mc-line) !important; }
+.mcui .mcui-chip button:focus { outline-offset: -0.7vh; box-shadow: none; }
+.mcui-empty-note { margin: 0; font-size: var(--mc-s); color: var(--mc-muted); }
+.mcui-privacy { display: grid; gap: 1.2vh; }
+.mcui-privacy p { margin: 0; font-size: var(--mc-s); color: var(--mc-muted); line-height: 1.4; }
+.mcui-privacy b { color: var(--mc-text); font-weight: 800; margin-right: 0.6em; }
+
+/* 登录成功：「欢迎回来，xxx」停留 1 秒。 */
+.mcui-greet {
+  padding: calc(var(--mc-gap) * 3) calc(var(--mc-gap) * 4);
+  font-size: var(--mc-l); font-weight: 800; text-align: center;
+  background: var(--mc-panel-solid); border: 0.4vh solid var(--mc-accent); border-radius: var(--mc-radius);
+  box-shadow: var(--mc-shadow);
+  animation: mcui-pop 420ms var(--mc-spring) both;
+}
+.mcui-greet-name { display: block; margin-top: 1vh; color: var(--mc-accent); overflow-wrap: anywhere; }
+@keyframes mcui-pop { from { transform: scale(0.82); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes mcui-rise { from { transform: translateY(3vh); opacity: 0; } to { transform: none; opacity: 1; } }
+.mcui-layer > .mcui-card { animation: mcui-rise 360ms var(--mc-ease) both; }
+/* 排行榜：位置由大屏页决定，这里只管面板本身。compact 给待机侧栏用。 */
+.mcui-board {
+  width: min(118vh, 100%); margin-inline: auto;
+  display: grid; gap: 1.4vh; align-content: start;
+  padding: calc(var(--mc-gap) * 1.6) calc(var(--mc-gap) * 2);
+  background: var(--mc-panel); border: 0.25vh solid var(--mc-line); border-radius: var(--mc-radius);
+  box-shadow: var(--mc-shadow);
+}
+.mcui-board-head { display: flex; align-items: center; justify-content: space-between; gap: var(--mc-gap); flex-wrap: wrap; }
+.mcui-board-title { margin: 0; font-size: var(--mc-l); font-weight: 800; line-height: 1.15; }
+.mcui-tabs { display: flex; gap: 1vh; padding: 0.8vh; border-radius: var(--mc-radius); background: color-mix(in srgb, var(--mc-ink) 60%, transparent); }
+.mcui-tab {
+  appearance: none; margin: 0; cursor: pointer;
+  min-height: 7.4vh; padding: 0 3.2vh;
+  font: inherit; font-size: var(--mc-m); font-weight: 800; color: var(--mc-muted);
+  background: transparent; border: 0; border-radius: var(--mc-radius-s);
+}
+.mcui-tab[aria-selected="true"] { color: var(--mc-ink); background: var(--mc-accent); }
+.mcui-board-sub { margin: 0; font-size: var(--mc-s); color: var(--mc-muted); }
+.mcui-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.6vh; }
+.mcui-row, .mcui-me {
+  display: grid; grid-template-columns: 7vh minmax(0, 1fr) auto; align-items: center; gap: 2.4vh;
+  min-height: 6.2vh; padding: 0 2.2vh;
+  border-radius: var(--mc-radius-s);
+  background: color-mix(in srgb, var(--mc-accent) 9%, var(--mc-panel-solid));
+}
+.mcui-row.is-me { background: color-mix(in srgb, var(--mc-accent) 24%, transparent); box-shadow: inset 0.9vh 0 0 var(--mc-warm); }
+.mcui-rank {
+  display: grid; place-items: center; width: 5.8vh; height: 5.8vh; border-radius: 50%;
+  font-family: var(--mc-num); font-size: var(--mc-m); font-weight: 800; color: var(--mc-text);
+}
+.mcui-rank.is-gold, .mcui-rank.is-silver, .mcui-rank.is-bronze { color: var(--mc-ink); box-shadow: inset 0 0 0 0.5vh color-mix(in srgb, var(--mc-ink) 16%, transparent); }
+.mcui-rank.is-gold { background: var(--mc-warm); }
+.mcui-rank.is-silver { background: color-mix(in srgb, var(--mc-text) 80%, var(--mc-muted)); }
+.mcui-rank.is-bronze { background: color-mix(in srgb, var(--mc-danger) 70%, var(--mc-warm)); }
+.mcui-name { min-width: 0; font-size: var(--mc-m); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcui-who { display: flex; align-items: center; gap: 1.2vh; min-width: 0; }
+.mcui-who .mcui-name { flex: 0 1 auto; }
+.mcui-you {
+  flex: none; padding: 0.3vh 1.2vh;
+  font-size: var(--mc-s); font-weight: 800; color: var(--mc-ink); background: var(--mc-warm); border-radius: var(--mc-radius-s);
+}
+.mcui-score { font-family: var(--mc-num); font-size: var(--mc-m); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mcui-score small { margin-left: 0.4em; font-family: var(--mc-font); font-size: var(--mc-s); font-weight: 700; color: var(--mc-muted); }
+.mcui-me { grid-template-columns: auto minmax(0, 1fr) auto; background: transparent; border: 0.3vh dashed var(--mc-warm); }
+.mcui-me-label { font-size: var(--mc-m); font-weight: 800; color: var(--mc-warm); white-space: nowrap; }
+.mcui-me .mcui-name { color: var(--mc-muted); }
+.mcui-state { margin: 0; padding: 4vh 2vh; text-align: center; font-size: var(--mc-m); font-weight: 700; color: var(--mc-muted); }
+.mcui-state[data-tone="warn"] { color: var(--mc-warm); }
+.mcui-stale { margin: 0; font-size: var(--mc-s); font-weight: 700; color: var(--mc-warm); }
+.mcui-skel {
+  min-height: 6.2vh; border-radius: var(--mc-radius-s);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mc-panel-solid) 55%, transparent) 30%, var(--mc-panel-hi) 50%, color-mix(in srgb, var(--mc-panel-solid) 55%, transparent) 70%);
+  background-size: 300% 100%; animation: mcui-shimmer 1.4s linear infinite;
+}
+@keyframes mcui-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.mcui-board.is-compact { width: min(58vh, 100%); gap: 1vh; padding: 2vh 2.2vh; }
+.mcui-board.is-compact .mcui-board-title { font-size: var(--mc-m); }
+.mcui-board.is-compact :is(.mcui-row, .mcui-me) { min-height: 5.4vh; gap: 1.6vh; grid-template-columns: 5.4vh minmax(0, 1fr) auto; padding: 0 1.4vh; }
+.mcui-board.is-compact .mcui-me { grid-template-columns: auto minmax(0, 1fr) auto; }
+.mcui-board.is-compact .mcui-rank { width: 4.8vh; height: 4.8vh; font-size: var(--mc-s); }
+.mcui-board.is-compact :is(.mcui-name, .mcui-score, .mcui-me-label, .mcui-state) { font-size: var(--mc-s); }
+.mcui-board.is-compact .mcui-state { padding: 2vh 1vh; }
+.mcui-board.is-compact .mcui-skel { min-height: 5.4vh; }
+/* 结算：左边四个动作和合计，右边名次翻牌或说明。 */
+.mcui-settle { width: min(164vh, 96vw); display: grid; gap: calc(var(--mc-gap) * 1.4); }
+.mcui-settle-body { display: grid; grid-template-columns: minmax(0, 1fr) 54vh; gap: calc(var(--mc-gap) * 2); align-items: stretch; }
+.mcui-moves { margin: 0; padding: 0; list-style: none; display: grid; gap: 1vh; }
+.mcui-move, .mcui-total {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 21vh; align-items: center; gap: 2.4vh;
+  min-height: 8.6vh; padding: 0 2.6vh;
+  border-radius: var(--mc-radius-s);
+  background: color-mix(in srgb, var(--mc-accent) 9%, var(--mc-panel-solid));
+  transition: opacity 320ms var(--mc-ease), transform 320ms var(--mc-ease);
+}
+.mcui-move.is-pending { opacity: 0; transform: translateX(-4vh); }
+.mcui-move-name { min-width: 0; font-size: var(--mc-m); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcui-move-name small { margin-left: 1.2vh; font-size: var(--mc-s); font-weight: 700; color: var(--mc-muted); }
+.mcui-count { font-family: var(--mc-num); font-size: var(--mc-l); font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; line-height: 1; }
+.mcui-count small, .mcui-kcal small { margin-left: 0.3em; font-family: var(--mc-font); font-size: var(--mc-s); font-weight: 700; color: var(--mc-muted); }
+.mcui-kcal { font-family: var(--mc-num); font-size: var(--mc-m); font-weight: 800; color: var(--mc-accent); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mcui-total { background: var(--mc-panel-hi); border: 0.3vh solid var(--mc-accent); transition: opacity 320ms var(--mc-ease), transform 320ms var(--mc-ease); }
+.mcui-total.is-pending { opacity: 0; transform: translateY(2vh); }
+.mcui-total .mcui-count, .mcui-total .mcui-kcal { color: var(--mc-warm); }
+.mcui-total .mcui-kcal { font-size: var(--mc-l); }
+
+.mcui-flip { perspective: 160vh; min-height: 42vh; display: flex; }
+.mcui-flip-inner { position: relative; flex: 1 1 auto; min-height: inherit; transform-style: preserve-3d; transition: transform 900ms var(--mc-spring); }
+.mcui-flip.is-flipped .mcui-flip-inner { transform: rotateY(180deg); }
+.mcui-face {
+  position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  display: grid; place-content: center; justify-items: center; gap: 1.2vh; padding: 3vh; text-align: center;
+  border-radius: var(--mc-radius); border: 0.4vh solid var(--mc-accent);
+  background: var(--mc-panel-solid);
+}
+.mcui-face-front { background: color-mix(in srgb, var(--mc-accent) 18%, var(--mc-panel-solid)); }
+.mcui-face-back { transform: rotateY(180deg); border-color: var(--mc-warm); }
+.mcui-face-q { font-family: var(--mc-num); font-size: calc(var(--mc-l) * 2); font-weight: 800; color: var(--mc-accent); line-height: 1; }
+.mcui-face-label { margin: 0; font-size: var(--mc-m); font-weight: 800; color: var(--mc-muted); }
+.mcui-face-rank { margin: 0; font-size: var(--mc-m); font-weight: 800; }
+.mcui-face-rank b { display: inline-block; margin: 0 0.15em; font-family: var(--mc-num); font-size: calc(var(--mc-l) * 2.2); line-height: 1; color: var(--mc-warm); vertical-align: -0.12em; }
+.mcui-face-detail { margin: 0; font-size: var(--mc-m); font-weight: 800; color: var(--mc-accent); }
+.mcui-face-extra { margin: 0; font-size: var(--mc-s); color: var(--mc-muted); }
+.mcui-reason {
+  display: grid; align-content: center; gap: 1.6vh; padding: 3.4vh;
+  border-radius: var(--mc-radius); border: 0.4vh solid var(--mc-line); background: var(--mc-panel-solid);
+  transition: opacity 420ms var(--mc-ease), transform 420ms var(--mc-ease);
+}
+.mcui-reason.is-pending { opacity: 0; transform: translateY(2vh); }
+.mcui-moves-box { display: grid; gap: 1vh; align-content: start; min-width: 0; }
+.mcui-reason-title { margin: 0; font-size: var(--mc-l); font-weight: 800; color: var(--mc-warm); }
+.mcui-reason p { margin: 0; font-size: var(--mc-m); font-weight: 700; }
+.mcui-reason .mcui-reason-tip { font-size: var(--mc-s); font-weight: 400; color: var(--mc-muted); }
+.mcui-settle-foot { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--mc-gap) * 2); }
+.mcui-settle-foot .mcui-sub { flex: 1 1 auto; }
+.mcui-settle-foot .mcui-btn { flex: none; min-width: 30vh; }
+.mcui-settle-head { display: flex; align-items: baseline; gap: 2.4vh; flex-wrap: wrap; }
+
+/* 账号管理（Esc 菜单里打开）。 */
+.mcui-menu { width: min(112vh, 96vw); display: grid; gap: var(--mc-gap); }
+.mcui-menu-body { display: grid; gap: var(--mc-gap); }
+.mcui-menu-list { display: grid; gap: var(--mc-gap); }
+.mcui-menu-list .mcui-btn { width: 100%; }
+.mcui-recent { display: grid; gap: 1.4vh; }
+.mcui-switch { justify-self: start; }
+.mcui-wrap:not(.has-eye) .mcui-caps { right: 1.6vh; }
+.mcui-wrap.has-caps:not(.has-eye) .mcui-input { padding-right: 20vh; }
+/* 连不上服务器时，游客按钮亮一圈，提示可以先当游客。 */
+.mcui-btn.is-hint { border-color: var(--mc-warm); box-shadow: 0 0 0 0.8vh color-mix(in srgb, var(--mc-warm) 30%, transparent); animation: mcui-glow 1.6s var(--mc-ease) infinite; }
+@keyframes mcui-glow { 50% { box-shadow: 0 0 0 1.6vh color-mix(in srgb, var(--mc-warm) 12%, transparent); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mcui *, .mcui *::before, .mcui *::after { animation: none !important; transition: none !important; }
+  .mcui .mcui-btn:focus { transform: none; }
+  .mcui .mcui-eye:focus { transform: translateY(-50%); }
+}

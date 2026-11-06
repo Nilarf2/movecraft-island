@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>MoveCraft 体感荒岛 · 大屏</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="stage/tokens.css">
+<link rel="stylesheet" href="stage/ui/ui.css">
+<link rel="stylesheet" href="stage/stage.css">
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.js"}}</script>
+</head>
+<body data-phase="boot">
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-water" viewBox="0 0 24 24"><path d="M12 2.5c3.7 4.7 6.6 8.4 6.6 11.7a6.6 6.6 0 0 1-13.2 0C5.4 10.9 8.3 7.2 12 2.5z"/></symbol>
+  <symbol id="i-wood" viewBox="0 0 24 24"><path d="M6 6.5h11a5.5 5.5 0 0 1 0 11H6a5.5 5.5 0 0 1 0-11z"/><circle cx="17" cy="12" r="3.2" fill="none" stroke="#052427" stroke-width="1.4" opacity=".55"/></symbol>
+  <symbol id="i-food" viewBox="0 0 24 24"><path d="M12 22V8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><ellipse cx="12" cy="5" rx="2.3" ry="3.5"/><ellipse cx="8.4" cy="10.2" rx="2.1" ry="3.3" transform="rotate(-38 8.4 10.2)"/><ellipse cx="15.6" cy="10.2" rx="2.1" ry="3.3" transform="rotate(38 15.6 10.2)"/><ellipse cx="8.4" cy="15.4" rx="2.1" ry="3.3" transform="rotate(-38 8.4 15.4)"/><ellipse cx="15.6" cy="15.4" rx="2.1" ry="3.3" transform="rotate(38 15.6 15.4)"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21s-7.6-4.6-9.7-9.3C.8 8.3 2.8 4.4 6.6 4.4c2.3 0 3.8 1.3 5.4 3.4 1.6-2.1 3.1-3.4 5.4-3.4 3.8 0 5.8 3.9 4.3 7.3C19.6 16.4 12 21 12 21z"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M2.8 11.6 12 3.8l9.2 7.8V20a1.2 1.2 0 0 1-1.2 1.2h-5V15h-6v6.2H4a1.2 1.2 0 0 1-1.2-1.2z"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V5.2a1.5 1.5 0 0 1 3 0v6M11 11V3.9a1.5 1.5 0 0 1 3 0V11M14 11V5.4a1.5 1.5 0 0 1 3 0V12M17 12V8.6a1.5 1.5 0 0 1 3 0v6.2c0 4-2.9 7-6.8 7-2.5 0-4.3-1.1-5.7-3.1L4.2 14.2a1.6 1.6 0 0 1 2.5-2L8 13.6"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h9A1.5 1.5 0 0 1 15 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 3 16.5zM16 10.5l5-3v9l-5-3z"/></symbol>
+</svg>
+
+<canvas id="world" aria-hidden="true"></canvas>
+<canvas id="world2d" width="1120" height="620" aria-hidden="true" hidden></canvas>
+<div id="scrim" aria-hidden="true"></div>
+
+<header id="top" class="band top" hidden>
+  <div class="panel route">
+    <ol id="dots" aria-label="四关进度"></ol>
+    <div class="stage-label"><small id="stageNo">第 1 关</small><b id="stageName">摘椰子</b></div>
+  </div>
+  <div class="panel vitals">
+    <span class="chip water" id="chipWater" title="淡水"><svg class="ico"><use href="#i-water"/></svg><b id="vWater">0</b></span>
+    <span class="chip wood" id="chipWood" title="木材"><svg class="ico"><use href="#i-wood"/></svg><b id="vWood">0</b></span>
+    <span class="chip food" id="chipFood" title="食物"><svg class="ico"><use href="#i-food"/></svg><b id="vFood">0</b></span>
+    <span class="chip hp" id="chipHp" title="生命值"><svg class="ico"><use href="#i-heart"/></svg><b id="vHp">100</b><i class="hpbar"><i id="hpFill"></i></i></span>
+  </div>
+</header>
+
+<section id="counter" class="counter" hidden aria-live="off">
+  <div class="ring-box">
+    <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="52"/><circle class="arc" id="ringArc" cx="60" cy="60" r="52"/></svg>
+    <p class="num"><b id="countNow">0</b><span id="countTarget">/10</span></p>
+  </div>
+  <p class="move" id="moveName">竖直跳</p>
+</section>
+
+<footer id="hint" class="band bottom" hidden><p class="panel hint" id="hintText" role="status"></p></footer>
+
+<div id="badges" class="badges" aria-live="polite"></div>
+<div id="notices" class="notices" aria-live="polite"></div>
+<div id="toast" class="toast panel" role="status" hidden><svg class="ico" id="toastIcon"><use href="#i-water"/></svg><div><b id="toastTitle"></b><p id="toastDetail"></p></div></div>
+<div id="fly" class="fly" aria-hidden="true"></div>
+
+<aside id="cam" class="cam" hidden>
+  <canvas id="camCanvas" width="320" height="240"></canvas>
+  <span class="cam-state" id="camState"><svg class="ico"><use href="#i-camera"/></svg><span id="camText">摄像头未开启</span></span>
+</aside>
+
+<main id="screens">
+  <section id="s-boot" class="screen boot" data-screen="boot">
+    <div class="panel center"><p class="eyebrow">MOVECRAFT · 体感荒岛</p><h2 id="bootText">正在启动…</h2></div>
+  </section>
+  <section id="s-attract" class="screen attract" data-screen="attract" hidden>
+    <div class="hero">
+      <p class="eyebrow">MOVECRAFT · 体感荒岛</p>
+      <h1>动起来，<br>建设你的小岛</h1>
+      <p class="cta"><svg class="ico wave"><use href="#i-hand"/></svg><span>挥手开始</span></p>
+      <p class="sub" id="attractSub">或按任意键</p>
+    </div>
+    <aside class="side"><div id="attractBoard" class="slot"></div></aside>
+  </section>
+  <section id="s-login" class="screen login" data-screen="login" hidden><div id="loginRoot" class="slot"></div></section>
+  <section id="s-loading" class="screen loading" data-screen="loading" hidden>
+    <div class="panel center"><p class="spinner" aria-hidden="true"></p><h2>正在读取你的小岛…</h2></div>
+  </section>
+  <section id="s-ready" class="screen ready" data-screen="ready" hidden>
+    <div class="panel center">
+      <p class="eyebrow" id="readyEyebrow">准备上岛</p>
+      <h1 id="readyTitle">欢迎回来</h1>
+      <p class="name" id="readyName"></p>
+      <p class="cta"><svg class="ico wave"><use href="#i-hand"/></svg><span id="readyCta">挥手登岛</span></p>
+      <p class="sub" id="readySub">右手向右侧平举，停一下，再往左挥 · 老师可按 Enter 直接开始</p>
+    </div>
+  </section>
+  <section id="s-failed" class="screen failed" data-screen="failed" hidden>
+    <div class="panel center"><p class="eyebrow">挑战结束</p><h1>生命值归零</h1><p class="sub">休息好了，随时可以重新开岛。<br>老师按 Esc 打开菜单，选「重新开岛」。</p></div>
+  </section>
+  <section id="s-settlement" class="screen settlement" data-screen="settlement" hidden><div id="settleRoot" class="slot"></div></section>
+  <section id="s-leaderboard" class="screen leaderboard" data-screen="leaderboard" hidden>
+    <div class="board-wrap"><div id="boardRoot" class="slot"></div><p class="countdown panel"><b id="boardCount">20</b> 秒后自动退出 · 按任意键立即退出</p></div>
+  </section>
+</main>
+
+<div id="pause" class="overlay" hidden><div class="panel center"><p class="eyebrow">已暂停</p><h1 id="pauseTitle">没有看到你</h1><p class="sub" id="pauseSub">回到镜头前就能继续</p></div></div>
+<div id="menu" class="overlay menu" role="dialog" aria-modal="true" aria-labelledby="menuTitle" hidden>
+  <div class="panel menu-panel"><h2 id="menuTitle">菜单</h2><ul id="menuList" role="menu"></ul><p class="sub">↑↓ 选择 · ←→ 调整 · Enter 确认 · Esc 返回</p></div>
+</div>
+
+<script>
+  // If the module graph fails to load, show a readable message instead of a frozen boot screen.
+  setTimeout(function () {
+    if (window.__stageBooted) return;
+    var t = document.getElementById('bootText');
+    if (t) t.textContent = '页面没有启动成功，请按 F5 刷新。';
+  }, 12000);
+</script>
+<script type="module" src="stage/main.js"></script>
+</body>
+</html>
